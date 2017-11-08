@@ -26,12 +26,8 @@ q=con.e
 colors = [(1, 0, 1), (0, 0, 1), (0, 1, 1), (0, 1, 0), (1, 1, 0), (1, 0, 0)]  # B -> G -> R
 LGBT = LinearSegmentedColormap.from_list('LGBT', colors, 500)
 
-# Load standard reference spectra ASTM G173
-wavel,g1_5,d1_5=np.loadtxt("AM1_5 smarts295.ext.txt",delimiter=',',usecols=(0,1,2),unpack=True) 
-Energies=1e9*hc/q/wavel # wavel is wavelenght in nm
-a1123456789=[1,1,2,3,4,5,6,7,8,9]
-
 def show_assumptions():
+    EQE=np.exp(-((Energies-1.7)/2.2)**6)
     plt.figure()
     plt.xlim(0.4,4)
     plt.ylim(0,1)
@@ -67,7 +63,14 @@ def show_assumptions():
     sali=plt.hist(lrnd,bins=40)
     plt.show()
 
-specs=np.load('scs.npy') # Load binned spectra
+# Load standard reference spectra ASTM G173
+wavel,g1_5,d1_5=np.loadtxt("AM1_5 smarts295.ext.txt",delimiter=',',usecols=(0,1,2),unpack=True) 
+Energies=1e9*hc/q/wavel # wavel is wavelenght in nm
+a1123456789=[1,1,2,3,4,5,6,7,8,9]
+
+# scs2.npy has been generated for Zenit<75.5 and -50<Lattitude<50
+# scs.npy has been generated for Zenit<80 and -60<Lattitude<60
+specs=np.load('scs2.npy') # Load binned spectra
 specs[0,0,:]=g1_5
 specs[1,0,:]=d1_5
 Iscs=np.copy(specs)
@@ -108,12 +111,12 @@ class effis(object):
     ERE=0.01 #external radiative efficiency without mirror. With mirror ERE increases by a factor (1 + beta)
     beta=11 #n^2 squared refractive index = radiative coupling parameter = substrate loss.
     rgaps=0 # Array with many Gap combinations
-    gaps=0 # 
+    gaps=[0,0,0,0,0,0] # If a gap is 0, it is randomly chosen by tandems.sample(), otherwise it is kept fixed at value given here.
     auxIs=0 # Aux array for sum of short circuit currents from all terminals.
     auxeffs=0 # Aux array for efficiencies. Has the same shape as rgaps for plotting and array masking.
     Is=0 # Currents as a function of the number of spectral bins, 0 is standard spectrum 
     effs=0 # Efficiencies as a function of the number of spectral bins, 0 is standard spectrum 
-    numbins=[4] # numbins is number of spectra used to evaluate eff, an array can be used to test the effect of the number of spectral bins
+    numbins=[6] # numbins is number of spectra used to evaluate eff, an array can be used to test the effect of the number of spectral bins
     # See convergence=True. Use [4] or more bins if not testing for convergence as a function of the number of spectral bins 
     convergence=False # Set to True to test the effect of changing the number of spectra used to calculate the yearly average efficiency
     Irc=0 # Radiative coupling current
@@ -126,8 +129,8 @@ class effis(object):
     Tmin=15+273.15 # Minimum ambient temperature at night in K
     deltaT=np.array([30,55]) # Device T increase over Tmin caused by high irradiance (1000 W/m2), first value is for flat plate cell, second for high concentration cell
     # T=70 for a 1mm2 cell at 1000 suns bonded to copper substrate. Cite I. Garcia, in CPV Handbook, ed. by: I. Rey-Stolle, C. Algora
-    junctions=3
-    numTop=0 # Number of series conected juctions in top stack (numTop=junctions in 2 terminal devices)
+    junctions=6
+    numTop=6 # Number of series conected juctions in top stack (numTop=junctions in 2 terminal devices)
     name='Test' # use for file saving
     cells=1000 # Desired number of calculated tandem cells
     # Total series resistance of each series connected stack in Ohm*m2
@@ -205,7 +208,7 @@ class effis(object):
                 else:
                     self.Irc=0
             Ijmin=Ij[bottomJ:topJ+1].min() # Min current in series connected stack
-            I=Ijmin*np.arange(0.75,1,0.0001) # IV curve sampling   
+            I=Ijmin*np.arange(0.8,1,0.0001) # IV curve sampling   
             for i in range(topJ,bottomJ-1,-1): # From top to bottom: Sample IV curve, get I0
                 if (i==bottomJ): # The bottom junction of each series connected stack has some additional photon recycling due to partial back reflection of luminescence
                     backLoss=1 # This is the loss due to an air gap between mechanically stacked cells. Same loss assumed for back contact metal mirrors.
@@ -215,10 +218,6 @@ class effis(object):
                 V+=(kT/q)*np.log((Ij[i]-I)/I0+1) # add voltage of series connected cells
             V-=self.R*I # V drop due to series resistance
             Imax=I[np.argmax(I*V)] # I at max power point
-            if int(Imax*1e5)==int(Ijmin*0.75*1e5):
-                print ('Currents lower than Ijmin*0.75 need to be sampled to find the max pow point.')
-                print ('Change 0.75 to a lower value in code for tandems.serie.')
-                pdb.set_trace()
             Imaxs.append(Imax)
         if len(Imaxs)>10:
             print ('Self consistency is slowing convergence while finding the maximum power point.')
@@ -233,7 +232,7 @@ class effis(object):
         self.serie(self.junctions-1,self.junctions-self.numTop,spec) # Add efficiency from top stack, numTop is number of juntions in top stack
         self.serie(self.junctions-self.numTop-1,0,spec) # Add efficiency from bottom stack
         return
-    def sample(self): # Sample efficiencies for random band gaps. The multijunction type is defined with junctions,numTop   
+    def sample(self): # Sample efficiencies for random band gaps. The multijunction type is defined with junctions,numTop
         startTime=time.time()
         ncells=0 #number of calculated gap combinations
         nres=0
@@ -247,15 +246,23 @@ class effis(object):
         self.auxeffs=np.zeros((self.cells+1000,self.junctions)) # Aux array for plotting only  
         self.Is=np.zeros((self.cells+1000,10)) # Currents as a function of the number of spectral bins, 0 is standard spectrum 
         self.effs=np.zeros((self.cells+1000,10)) # Efficiencies as a function of the number of spectral bins, 0 is standard spectrum 
-
+        fixedGaps=np.copy(self.gaps) # copy input gaps to remember which ones are fixed, if gap==0 make it random
         while (nres<self.cells+1000): # loop to randomly sample a large number of gap combinations
             self.gaps=np.zeros(self.junctions+1) #the last gap is not the top junction, it is the high energy limit of the spectrum
             self.gaps[-1]=4.42 
             lastgap=0
-            for i in range(0,self.junctions):     # From bottom to top: define random gaps
-                self.gaps[i]=lastgap+np.random.rand()*Escatter[i]+Eshifts[i] #define gaps from random differences in energy 
-                lastgap=self.gaps[i]  
-                              
+            i=0
+            while i<self.junctions:     # From bottom to top: define random gaps
+                if fixedGaps[i]==0:
+                    self.gaps[i]=lastgap+np.random.rand()*Escatter[i]+Eshifts[i] #define gaps from random differences in energy 
+                else:
+                    self.gaps[i]=fixedGaps[i] # any gaps with a value other than 0 are kept fixed, example: tandems.effis(gaps=[0.7,0,0,1.424,0,2.1]) .
+                if self.gaps[i]<lastgap:
+                    lastgap=0 # restart if a fixed gap is smaller than a lower junction
+                    i=0
+                else:
+                    lastgap=self.gaps[i]
+                    i+=1
             self.Itotal=0
             self.Pout=0
             self.stack(1) # calculate power out with average spectrum (1 bin) 
@@ -370,9 +377,9 @@ def generate_spectral_bins():
     # Line 189
     #       batch=.TRUE.
     # Line 1514
-    #      IF(Zenit.LE.80.)GOTO 13
+    #      IF(Zenit.LE.75.5224)GOTO 13
     #      WRITE(16,103,iostat=Ierr24)Zenit
-    # 103  FORMAT(//,'Zenit = ',F6.2,' is > 80 deg. (90 in original code)'
+    # 103  FORMAT(//,'Zenit = ',F6.2,' is > 75.5224 deg. (90 in original code) This is equivalent to AM < 4'
     # This change is needed because trackers are shadowed by neighboring trackers when the sun is near the horizon. 
     # Zenit 80 is already too close to the horizon to use in most cases due to shadowing issues.
 
@@ -385,7 +392,7 @@ def generate_spectral_bins():
     Pd=np.zeros(numres) # Power for each spectrum
     Pg=np.zeros(numres)
 
-    os.chdir('/home/jose/SMARTS')
+    #os.chdir('/home/jose/SMARTS')
     with open ('smarts295.in_.txt', "r") as fil: # Load template for SMARTS input file
         t0=fil.readlines()
     t0=''.join(t0)
@@ -396,14 +403,20 @@ def generate_spectral_bins():
             t1=t0.replace('AOD#',str(min(5.4,np.random.lognormal(-2.141,1)))) # Substitute AOD and PW in template file
             t1=t1.replace('PW#',str(min(12,0.39*np.random.chisquare(4.36)))) # For more info do "tandems.show_assumptions()"
             t2=datetime.fromtimestamp(3503699364*np.random.rand()+1503699364).strftime("%Y %m %d %H")+' '
-            t2+='%.2f' % (120*np.arccos(2*np.random.rand()-1)/np.pi-60)+' '  # 60 > Latitude > -60
+            t2+='%.2f' % (100*np.arccos(2*np.random.rand()-1)/np.pi-50)+' '  # 50 > Latitude > -50
             t2+='%.2f' % (360*np.random.rand()-180)+' 0\t\t\t!Card 17a Y M D H Lat Lon Zone\n\n'
             with open('smarts295.inp.txt' , "w") as fil:
                 fil.write(t1+t2)
-            os.remove("smarts295.ext.txt")
-            os.remove("smarts295.out.txt")
+            try:
+                os.remove("smarts295.ext.txt")
+            except OSError:
+                pass
+            try:
+                os.remove("smarts295.out.txt")
+            except OSError:
+                pass                
             sc+=1
-            ou=sub.check_call('./smartsb', shell=True) # execute SMARTS
+            ou=sub.check_call('./smartsAM4', shell=True) # execute SMARTS
             tama=os.stat('smarts295.ext.txt').st_size # check output file
             if tama>0:
                 try: # load output file if it exists
@@ -476,4 +489,4 @@ def generate_spectral_bins():
             Iscs[0,k,:]=gbinspecs[i][j]
             Iscs[1,k,:]=dbinspecs[i][j]
             k+=1
-    np.save('scs', Iscs)
+    np.save('scs2', Iscs)
