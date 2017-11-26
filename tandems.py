@@ -1,5 +1,5 @@
 # Random sampling of multijunction photovoltaic efficiencies. Jose M. Ripalda
-# This script requires doing "pip install json_tricks" before running
+# Requires doing "pip install json_tricks" before running
 # Tested with Python 2.7 and 3.6
 # SMARTS 2.9.5 is required only to generate a new set of random spectra. 
 # File "scs2.npy" can be used instead of SMARTS to load a set of binned spectra.
@@ -124,7 +124,48 @@ def Varshni(T): #Gives gap correction in eV relative to 300K using GaAs paramete
     return (T**2)/(T+572)*-8.871e-4+0.091558486 # GaAs overestimates effect for most other semiconductors. Effect is small anyway.
 
 class effis(object): 
-    """ Class to hold results sets of yearly average photovoltaic efficiency """  
+    """ Class to hold results sets of yearly average photovoltaic efficiency 
+    
+    tandems.effis( comma separated list of options here )
+    
+    Options that can be used when calling tandems.effis( )
+    
+    ERE=0.01     External radiative efficiency without mirror. With mirror ERE increases by a factor (1 + beta)
+    beta=11     n^2 squared refractive index = radiative coupling parameter = substrate loss.
+    rgaps=0      Results Array with high efficiency Gap combinations found by trial and error
+    Is=0      Results Array with Currents as a function of the number of spectral bins, 0 is standard spectrum 
+    effs=0      Results Array with Efficiencies as a function of the number of spectral bins, 0 is standard spectrum
+    gaps=[0,0,0,0,0,0]      If a gap is 0, it is randomly chosen by tandems.sample(), otherwise it is kept fixed at value given here.
+    auxEffs=0      Aux array for efficiencies. Has the same shape as rgaps for plotting and array masking. 
+    auxIs=0      Aux array for plotting. sum of short circuit currents from all terminals.
+    bins=6      Bins is number of spectra used to evaluate eff, an array can be used to test the effect of the number of spectral bins
+         # See convergence=True. Use [4] or more bins if not testing for convergence as a function of the number of spectral bins 
+    convergence=False      Set to True to test the effect of changing the number of spectral bins  used to calculate the yearly average efficiency
+    Irc=0      Radiative coupling current
+    Itotal=0      Isc
+    Pout=0      Power out
+    concentration=1000
+    transmission=0.02      Subcell thickness cannot be infinite, 3 micron GaAs has transmission in the 2 to 3 % range (depending on integration range)
+    thinning=False      Automatic subcell thinning for current matching
+    thinSpec=1      Spectrum used to calculate subcell thinning for current matching. Integer index in specs array. 
+    thinTrans=1      Array with transmission of each subcell
+    effMin=0.02      Lowest sampled efficiency value relative to maximum efficiency. Gaps with lower efficiency are discarded.
+    d=0      0 for global spectra, 1 for direct spectra
+    Tmin=15+273.15      Minimum ambient temperature at night in K
+    deltaT=np.array([30,55])      Device T increase over Tmin caused by high irradiance (1000 W/m2), first value is for flat plate cell, second for high concentration cell
+         # Temperature is 70 for a 1mm2 cell at 1000 suns bonded to copper substrate. See I. Garcia, et al. in CPV Handbook, ed. by: I. Rey-Stolle, C. Algora
+    junctions=6
+    topJunctions=6      Number of series conected juctions in top stack (topJunctions=junctions in 2 terminal devices)
+    name='Test'      Used for file saving
+    cells=1000      Desired number of calculated tandem cells
+         Total series resistance of each series connected stack in Ohm*m2
+    R=5e-7      Default is optimistic value for high concentration devices
+         R=4e-5 is suggested for one sun flat plate devices
+    EQE=0      This is changed in __init__, type show_assumptions() to see actual EQE
+    Ijx=0      Array with the external photocurrents integrated from spectrum. Is set by getIjx()
+    T=0      Set from irradiance at run time
+    
+    """  
     # s = self = current object instance
     ERE=0.01 #external radiative efficiency without mirror. With mirror ERE increases by a factor (1 + beta)
     beta=11 #n^2 squared refractive index = radiative coupling parameter = substrate loss.
