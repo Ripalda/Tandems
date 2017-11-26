@@ -1,7 +1,8 @@
 # Random sampling of multijunction photovoltaic efficiencies. Jose M. Ripalda
 # This script requires doing "pip install json_tricks" before running
+# Tested with Python 2.7 and 3.6
 # SMARTS 2.9.5 is required only to generate a new set of random spectra. 
-# File "scs.npy" can be used instead of SMARTS to load a set of binned spectra.
+# File "scs2.npy" can be used instead of SMARTS to load a set of binned spectra.
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -22,6 +23,8 @@ import subprocess as sub
 from datetime import datetime
 hc=con.h*con.c
 q=con.e
+
+np.set_printoptions(precision=3) # Print 4 decimal places only
 
 colors = [(1, 0, 1), (0, 0, 1), (0, 1, 1), (0, 1, 0), (1, 1, 0), (1, 0, 0)]  # B -> G -> R
 LGBT = LinearSegmentedColormap.from_list('LGBT', colors, 500)
@@ -84,255 +87,343 @@ for i in range(1,10): #bin set
     for j in range(0,i): #bin counter
         bindex[i].append(k)        
         k+=1
-        
-Ef=[] # These arrays are used to speed up calculations 
-Es=[] # by limiting the energy gap search space.
-# initial guess at where the eff maxima are. The search space is expanded as needed if high eff are found at the edges of the search space.  
-Ef.append([])# 0 junctions, padding
-Es.append([])
-Es.append([.9]) # First set of values are base energy shifts between junctions
-Es.append([.6,.7])
-Es.append([.55,.50,.55])
-Es.append([.55,.45,.45,.55])
-Es.append([.55,.3,.4,.4,.5])
-Es.append([.55,.3,.3,.35,.35,.5])
-Ef.append([.8])# 1 junction. Second set of values are scatter factors for the energy shifts
-Ef.append([.7,.4])# 2 junctions
-Ef.append([.4,.25,.1])# 3 junctions
-Ef.append([.4,.25,.1,.1])# 4 junctions
-Ef.append([.4,.25,.25,.1,.1])# 5 junctions
-Ef.append([.4,.25,.25,.1,.1,.1])# 6 junctions
+# These arrays are used to speed up calculations by limiting the energy gap search space.
+# Initial guess at where the eff maxima are. 
+# The search space is expanded as needed if high eff are found at the edges of the search space. 
+Emax=[] # Max energy for each gap
+Emin=[] # Min energy for each gap
+Emax.append([1.6]) # 1 junction
+Emin.append([0.9])
+Emax.append([1.40,2.00]) # 2  junctions
+Emin.append([0.85,1.40])
+Emax.append([1.20,1.67,2.00]) # 3  junctions
+Emin.append([0.65,1.15,1.60])
+Emax.append([1.10,1.51,1.90,2.10]) # 4  junctions
+Emin.append([0.50,0.94,1.25,1.80])
+Emax.append([0.95,1.15,1.55,2.00,2.25]) # 5  junctions
+Emin.append([0.50,0.83,1.15,1.50,1.90])
+Emax.append([0.95,1.15,1.50,1.90,2.10,2.30]) # 6  junctions
+Emin.append([0.50,0.78,1.05,1.40,1.70,2.05])
+
+# These arrays are used to discard band gap combinations that are too unevenly spaced in energy
+maxDif=[]
+minDif=[] 
+maxDif.append([1.00]) # 2 junctions, max E difference between junctions
+minDif.append([0.70]) # 2 junctions, min E difference between junctions
+maxDif.append([0.65,0.55])
+minDif.append([0.50,0.50]) # 3 junctions
+maxDif.append([0.60,0.55,0.65])
+minDif.append([0.45,0.45,0.55]) # 4 junctions
+maxDif.append([0.50,0.60,0.45,0.55])
+minDif.append([0.30,0.40,0.40,0.45]) # 5 junctions
+maxDif.append([0.50,0.50,0.40,0.40,0.50])
+minDif.append([0.28,0.28,0.32,0.32,0.42]) # 6 junctions
+
 #Varshni, Y. P. Temperature dependence of the energy gap in semiconductors. Physica 34, 149 (1967)
 def Varshni(T): #Gives gap correction in eV relative to 300K using GaAs parameters. T in K
     return (T**2)/(T+572)*-8.871e-4+0.091558486 # GaAs overestimates effect for most other semiconductors. Effect is small anyway.
 
 class effis(object): 
     """ Class to hold results sets of yearly average photovoltaic efficiency """  
+    # s = self = current object instance
     ERE=0.01 #external radiative efficiency without mirror. With mirror ERE increases by a factor (1 + beta)
     beta=11 #n^2 squared refractive index = radiative coupling parameter = substrate loss.
-    rgaps=0 # Array with many Gap combinations
+    rgaps=0 # Results Array with high efficiency Gap combinations found by trial and error
+    Is=0 # Results Array with Currents as a function of the number of spectral bins, 0 is standard spectrum 
+    effs=0 # Results Array with Efficiencies as a function of the number of spectral bins, 0 is standard spectrum
     gaps=[0,0,0,0,0,0] # If a gap is 0, it is randomly chosen by tandems.sample(), otherwise it is kept fixed at value given here.
-    auxIs=0 # Aux array for sum of short circuit currents from all terminals.
-    auxeffs=0 # Aux array for efficiencies. Has the same shape as rgaps for plotting and array masking.
-    Is=0 # Currents as a function of the number of spectral bins, 0 is standard spectrum 
-    effs=0 # Efficiencies as a function of the number of spectral bins, 0 is standard spectrum 
-    numbins=[6] # numbins is number of spectra used to evaluate eff, an array can be used to test the effect of the number of spectral bins
+    auxEffs=0 # Aux array for efficiencies. Has the same shape as rgaps for plotting and array masking. 
+    auxIs=0 # Aux array for plotting. sum of short circuit currents from all terminals.
+    bins=6 # bins is number of spectra used to evaluate eff, an array can be used to test the effect of the number of spectral bins
     # See convergence=True. Use [4] or more bins if not testing for convergence as a function of the number of spectral bins 
-    convergence=False # Set to True to test the effect of changing the number of spectra used to calculate the yearly average efficiency
+    convergence=False # Set to True to test the effect of changing the number of spectral bins  used to calculate the yearly average efficiency
     Irc=0 # Radiative coupling current
     Itotal=0 # Isc
     Pout=0 # Power out
     concentration=1000
-    thinning=False # Automatic top cell thinning for current matching
-    effmin=0.02 # Lowest sampled efficiency value relative to maximum efficiency. Gaps with lower efficiency are discarded.
-    d=0
+    transmission=0.02 # Subcell thickness cannot be infinite, 3 micron GaAs has transmission in the 2 to 3 % range (depending on integration range)
+    thinning=False # Automatic subcell thinning for current matching
+    thinSpec=1 # Spectrum used to calculate subcell thinning for current matching. Integer index in specs array. 
+    thinTrans=1 # Array with transmission of each subcell
+    effMin=0.02 # Lowest sampled efficiency value relative to maximum efficiency. Gaps with lower efficiency are discarded.
+    d=0 # 0 for global spectra, 1 for direct spectra
     Tmin=15+273.15 # Minimum ambient temperature at night in K
     deltaT=np.array([30,55]) # Device T increase over Tmin caused by high irradiance (1000 W/m2), first value is for flat plate cell, second for high concentration cell
     # T=70 for a 1mm2 cell at 1000 suns bonded to copper substrate. Cite I. Garcia, in CPV Handbook, ed. by: I. Rey-Stolle, C. Algora
     junctions=6
-    numTop=6 # Number of series conected juctions in top stack (numTop=junctions in 2 terminal devices)
+    topJunctions=6 # Number of series conected juctions in top stack (topJunctions=junctions in 2 terminal devices)
     name='Test' # use for file saving
     cells=1000 # Desired number of calculated tandem cells
     # Total series resistance of each series connected stack in Ohm*m2
     R=5e-7 # Default is optimistic value for high concentration devices
     # R=4e-5 is suggested for one sun flat plate devices
     EQE=0 # This is changed in __init__, type show_assumptions() to see actual EQE
-    def __init__(self, **kwargs):
-        self.EQE=np.exp(-((Energies-1.7)/2.2)**6) # Optimistic default EQE model, 74% at 3.5 eV, >99% from 2.5 to 0.9 eV, 96% at 0.4 eV
+    Ijx=0 # Array with the external photocurrents integrated from spectrum. Is set by getIjx()
+    T=0 # set from irradiance at run time
+    def __init__(s, **kwargs):
+        s.EQE=np.exp(-((Energies-1.7)/2.2)**6) # Optimistic default EQE model, 74% at 3.5 eV, >99% from 2.5 to 0.9 eV, 96% at 0.4 eV
         # can do effis( EQE = 1 ) to override this default. Any array with the same length as the spectra will do too
         for k, v in kwargs.items():
-            setattr(self, k, v)
-        def integra(d,spec): # Integrate spectra
+            setattr(s, k, v)
+        if type(s.bins)==int:
+            s.bins=[s.bins]
+        def integra(d,spec): # Function to Integrate spectra from UV to given wavelength 
             global Iscs, P
-            P[d,spec]=integrate.trapz(specs[d,spec,:], x=wavel) # W / m2
-            Iscs[d,spec,:]=(q/hc)*np.insert(1e-9*integrate.cumtrapz(self.EQE*specs[d,spec,:]*wavel,x=wavel),0,0) # Current in A / m2, wavelength in nm
-        for d in [0,1]: # Integrate spectra
+            P[d,spec]=integrate.trapz(specs[d,spec,:], x=wavel) # Power per unit area ( W / m2 )
+            Iscs[d,spec,:]=(q/hc)*np.insert(1e-9*integrate.cumtrapz(s.EQE*specs[d,spec,:]*wavel,x=wavel),0,0) # Current per unit area ( A / m2 ), wavelength in nm
+        for d in [0,1]: # Integrate spectra from UV to given wavelength 
             for i in range(0,46):
                 integra(d,i)
-        if self.numTop==0:
-            self.numTop=self.junctions
-        if self.convergence:
-            self.numbins=[1,2,3,4,5,6,7,8,9]
-        if self.concentration>1:
-            self.d=1 # use direct spectra
+        if s.topJunctions==0:
+            s.topJunctions=s.junctions
+        if s.convergence:
+            s.bins=[1,2,3,4,5,6,7,8,9]
+        if s.concentration>1:
+            s.d=1 # use direct spectra
             
-    def Isce(self,gap,spec): # Integrated Current as function of gap
-        return np.interp(1e9*hc/gap/q,wavel,Iscs[self.d,spec,:]) # wavelength in nm
-    
-    def serie(self,topJ,bottomJ,spec): # Use a single spectrum to get power from series connected subcells with indexes topJ to bottomJ. topJ=bottomJ is single junction. 
-        # PSEUDOCODE:
-        # get external photocurrent in each junction
-        # get current at the maximum power point from min external photocurrent
-        # add radiative coupling, recalculate maximum power point, this changes radiative coupling, repeat until self consistency
-        # calculate power out
+    def intSpec(s,energy,spec): # Returns integrated photocurrent from given photon energy to UV
+        return np.interp(1e9*hc/energy/q,wavel,Iscs[s.d,spec,:]) # interpolate integrated spectra. Wavelength in nm
+    def getIjx(s,spec): # Get current absorbed in each junction, external photocurrent only
+        if spec!=None: # if None keep using previous results for Ijx
+            s.Ijx=np.zeros(s.junctions)
+            IfromTop=0
+            upperIUVE=0
+            for i in range(s.junctions-1,-1,-1): # From top to bottom: get external photocurrent in each junction
+                IUVE=s.intSpec(s.gaps[i]+Varshni(s.T),spec) # IUVE = Integrated current from UV to given Energy gap
+                Ijx0=s.concentration*(IUVE-upperIUVE) # Get external I per junction 
+                #print (i,s.gaps[i],IUVE,IUVE-previousIUVE)
+                upperIUVE=IUVE
+                if i!=0:
+                    s.Ijx[i]=(1-s.transmission)*Ijx0+IfromTop # Subcell thickness cannot be infinite, 3 micron GaAs has transmission in the 2 to 3 % range (depending on integration range)
+                    IfromTop=s.transmission*Ijx0
+                else:
+                    s.Ijx[i]=Ijx0+IfromTop # bottom junction does not transmit (back mirror)
+    def thin(s,topJ,bottomJ): # Calculate transmission factors for each subcell in series to maximize current under spectrum given in thinSpec      
+        # Top cell thinning: 
+        # - From top to bottom junction
+        #       - If next current is lower :
+        #             - Find average with next junction
+        #             - If average I is larger than next junction I, extend average and repeat this step
+                
+        s.getIjx(s.thinSpec) # get external photocurrent  
+        initialIjx = np.copy(s.Ijx)
+        
+        Ijxmin=0
+        while int(Ijxmin*100) != int(s.Ijx.min()*100): # While min I keeps going up
+            Ijxmin = s.Ijx.min()
+            i = topJ
+            while i > bottomJ-1 : # Spread I from top to bottom
+                if s.Ijx[i] > s.Ijx[i-1]: # If next current is lower 
+                    imean=i
+                    mean=s.Ijx[i]
+                    previousMean=0
+                    while mean > previousMean :
+                        imean-=1
+                        previousMean=mean
+                        if imean > -1 :
+                            mean=np.mean(s.Ijx[imean:i+1])
+                    s.Ijx[imean:i+1] = mean
+                    i = imean
+                i-=1
+
+        s.thinTrans=initialIjx/s.Ijx
+
+        #print ('in',initialIjx,initialIjx.sum())
+        #print ('out',s.Ijx,s.Ijx.sum())
+        #print (s.thinTrans)
+        
+    def serie(s,topJ,bottomJ): # Get power from series connected subcells with indexes topJ to bottomJ. topJ=bottomJ is single junction. 
+        # 1 - Get external photocurrent in each junction
+        # 2 - Get current at the maximum power point from min external photocurrent
+        # 3 - Add radiative coupling, recalculate maximum power point, this changes radiative coupling, repeat until self consistency
+        # 4 - Calculate power out
         
         # Do "tandems.show_assumptions()" to see EQE model used and some characteristics of the spectral set used.
 
         if (topJ<0):
             return
-        T=self.Tmin+self.deltaT[self.d]*P[self.d,spec]/1000 # To a first approximation, cell T is a linear function of irradiance.
-        # T=70 for a 1mm2 cell at 1000 suns bonded to copper substrate. Cite I. Garcia, in CPV Handbook, ed. by: I. Rey-Stolle, C. Algora
-        kT=con.k*T
-        Irc0=self.Irc #radiative coupling from upper stack 
-        Ijx=np.zeros(self.junctions) # Current absorbed in each junction, external photocurrent only
-        for i in range(topJ,bottomJ-1,-1): # From top to bottom: get external photocurrent in each junction
-            Ijx[i]=self.concentration*(self.Isce(self.gaps[i]+Varshni(T),spec)-self.Isce(self.gaps[i+1]+Varshni(T),spec)) # Get external I per junction 
-        if self.thinning:
-            # Top cell thinning: 
-            # 1 - Find min I,
-            # 2 - average 2,3,4,5 adjacent upper junctions, choose the higher I,
-            # 3 - repeat until min I does not change
-            imi=np.argmin(Ijx)
-            if imi<topJ:
-                Ijxmin=0
-                while Ijx.min()<>Ijxmin:
-                    Ijxmin=Ijx.min()
-                    mav=[]
-                    for i in range(imi+1,topJ+1):
-                        mav.append(np.mean(Ijx[imi:i]))
-                    mav=np.array(mav)
-                    imavmax=np.argmax(mav)
-                    for i in range(imi,imavmax+1):
-                        Ijx[i]=mav.max()
-            
+        kT=con.k*s.T
+        Irc0=s.Irc #radiative coupling from upper stack 
+
+
+        Ijx=s.Ijx*s.thinTrans # thinTrans is set by thin()
         Imax=Ijx[bottomJ:topJ+1].min() # Initial guess for current at the maximum power point 
         Imaxs=[0,Imax]
-        while (((Imax-Imaxs[-2])/Imax)**2)>1e-7: # Loop to self consistently refine max power point
+        while (((Imax-Imaxs[-2])/Imax)**2)>1e-7: # Loop to s consistently refine max power point
             V=0
-            self.Irc=Irc0 # Radiative coupling from upper stack 
+            s.Irc=Irc0 # Radiative coupling from upper stack 
             Ij=np.copy(Ijx) # Current absorbed in each junction
             for i in range(topJ,bottomJ-1,-1): # From top to bottom: get photocurrent in each junction including radiative coupling
-                Ij[i]+=self.Irc # Include emitted light from upper junction
+                Ij[i]+=s.Irc # Include emitted light from upper junction
                 if (Ij[i]>Imax): # If there is excess current in this junction, radiative coupling
-                    self.Irc=self.beta*self.ERE*(Ij[i]-Imax) #radiative coupling 
+                    s.Irc=s.beta*s.ERE*(Ij[i]-Imax) #radiative coupling 
                 else:
-                    self.Irc=0
+                    s.Irc=0
             Ijmin=Ij[bottomJ:topJ+1].min() # Min current in series connected stack
             I=Ijmin*np.arange(0.8,1,0.0001) # IV curve sampling   
             for i in range(topJ,bottomJ-1,-1): # From top to bottom: Sample IV curve, get I0
                 if (i==bottomJ): # The bottom junction of each series connected stack has some additional photon recycling due to partial back reflection of luminescence
                     backLoss=1 # This is the loss due to an air gap between mechanically stacked cells. Same loss assumed for back contact metal mirrors.
                 else:
-                    backLoss=self.beta
-                I0=(1+backLoss) * 2*np.pi*q * np.exp(-1*self.gaps[i]*q/kT) * kT**3*((self.gaps[i]*q/kT+1)**2+1) / (con.h*hc**2) / self.ERE # Dark current at V=0 in A / m2 s
+                    backLoss=s.beta
+                I0=(1+backLoss) * 2*np.pi*q * np.exp(-1*s.gaps[i]*q/kT) * kT**3*((s.gaps[i]*q/kT+1)**2+1) / (con.h*hc**2) / s.ERE # Dark current at V=0 in A / m2 s
                 V+=(kT/q)*np.log((Ij[i]-I)/I0+1) # add voltage of series connected cells
-            V-=self.R*I # V drop due to series resistance
+            V-=s.R*I # V drop due to series resistance
             Imax=I[np.argmax(I*V)] # I at max power point
             Imaxs.append(Imax)
         if len(Imaxs)>10:
-            print ('Self consistency is slowing convergence while finding the maximum power point.')
+            print ('s consistency is slowing convergence while finding the maximum power point.')
             print ('ERE or beta might be too high.')
             print ('Current at the maximum power point is converging as:', Imaxs)
             pdb.set_trace()
-        self.Itotal+=Ijmin
-        self.Pout+=(I*V).max()
+        s.Itotal+=Ijmin
+        s.Pout+=(I*V).max()
         return
-    def stack(self,spec): # Use a single spectrum to get power from 4 terminal tandem, if numTop=junctions the result is for 2 terminal tandem.
-        self.Irc=0 # For top cell there is no radiative coupling from upper cell
-        self.serie(self.junctions-1,self.junctions-self.numTop,spec) # Add efficiency from top stack, numTop is number of juntions in top stack
-        self.serie(self.junctions-self.numTop-1,0,spec) # Add efficiency from bottom stack
+        
+    def stack(s,spec): # Use a single spectrum to get power from 4 terminal tandem, if topJunctions=junctions the result is for 2 terminal tandem.
+        s.Irc=0 # For top cell there is no radiative coupling from upper cell
+        s.T=s.Tmin+s.deltaT[s.d]*P[s.d,spec]/1000 # To a first approximation, cell T is a linear function of irradiance.
+        # T=70 for a 1mm2 cell at 1000 suns bonded to copper substrate. Cite I. Garcia, in CPV Handbook, ed. by: I. Rey-Stolle, C. Algora
+        s.getIjx(spec) # Get external photocurrents
+        s.serie(s.junctions-1,s.junctions-s.topJunctions) # Add efficiency from top stack, topJunctions is number of juntions in top stack
+        s.serie(s.junctions-s.topJunctions-1,0) # Add efficiency from bottom stack
         return
-    def sample(self): # Sample efficiencies for random band gaps. The multijunction type is defined with junctions,numTop
+    def sample(s): # Sample efficiencies for random band gaps. The multijunction type is defined with junctions,topJunctions
         startTime=time.time()
-        ncells=0 #number of calculated gap combinations
+        ncells=0 # Number of calculated gap combinations
         nres=0
         effmax=0
-        Eshifts=Es[self.junctions] # initial guess at where the eff maxima are. The search space is expanded as needed if high eff are found at the edges of the search space.        
-        Escatter=Ef[self.junctions]
-        # REMOVE SEED ! unless you want to reuse the same sequence of random numbers (e.g.: compare results after changing one parameter)
-        np.random.seed(07022015)
-        self.rgaps=np.zeros((self.cells+1000,self.junctions)) # Gaps
-        self.auxIs=np.zeros((self.cells+1000,self.junctions)) # Aux array for plotting only
-        self.auxeffs=np.zeros((self.cells+1000,self.junctions)) # Aux array for plotting only  
-        self.Is=np.zeros((self.cells+1000,10)) # Currents as a function of the number of spectral bins, 0 is standard spectrum 
-        self.effs=np.zeros((self.cells+1000,10)) # Efficiencies as a function of the number of spectral bins, 0 is standard spectrum 
-        fixedGaps=np.copy(self.gaps) # copy input gaps to remember which ones are fixed, if gap==0 make it random
-        while (nres<self.cells+1000): # loop to randomly sample a large number of gap combinations
-            self.gaps=np.zeros(self.junctions+1) #the last gap is not the top junction, it is the high energy limit of the spectrum
-            self.gaps[-1]=4.42 
+        Emin_=np.array(Emin[s.junctions-1]) # Initial guess at where the eff maxima are. 
+        Emax_=np.array(Emax[s.junctions-1]) # The search space is expanded as needed if high eff are found at the edges of the search space.        
+        minDif_=np.array(minDif[s.junctions-2])
+        maxDif_=np.array(maxDif[s.junctions-2])
+        # REMOVE SEED unless you want to reuse the same sequence of random numbers (e.g.: compare results after changing one parameter)
+        #np.random.seed(07022015)
+        s.rgaps=np.zeros((s.cells+1000,s.junctions)) # Gaps
+        s.auxIs=np.zeros((s.cells+1000,s.junctions)) # Aux array for plotting only
+        s.auxEffs=np.zeros((s.cells+1000,s.junctions)) # Aux array for plotting only  
+        s.Is=np.zeros((s.cells+1000,10)) # Currents as a function of the number of spectral bins, 0 is standard spectrum 
+        s.effs=np.zeros((s.cells+1000,10)) # Efficiencies as a function of the number of spectral bins, 0 is standard spectrum 
+        fixedGaps=np.copy(s.gaps) # Copy input gaps to remember which ones are fixed, if gap==0 make it random
+        while (nres<s.cells+1000): # Loop to randomly sample a large number of gap combinations
+            s.gaps=np.zeros(s.junctions)  
             lastgap=0
             i=0
-            while i<self.junctions:     # From bottom to top: define random gaps
+            while i<s.junctions:     # From bottom to top: define random gaps
+                if i>0:
+                    Emini = max(Emin_[i] , lastgap + minDif_[i-1]) # Avoid gap combinations that are too unevenly spaced
+                    Emaxi = min(Emax_[i] , lastgap + maxDif_[i-1])
+                else:
+                    Emini = Emin_[i]
+                    Emaxi = Emax_[i]
+                Erange = Emaxi - Emini
                 if fixedGaps[i]==0:
-                    self.gaps[i]=lastgap+np.random.rand()*Escatter[i]+Eshifts[i] #define gaps from random differences in energy 
+                    s.gaps[i] = Emini + Erange * np.random.rand() #define random gaps
                 else:
-                    self.gaps[i]=fixedGaps[i] # any gaps with a value other than 0 are kept fixed, example: tandems.effis(gaps=[0.7,0,0,1.424,0,2.1]) .
-                if self.gaps[i]<lastgap:
-                    lastgap=0 # restart if a fixed gap is smaller than a lower junction
-                    i=0
-                else:
-                    lastgap=self.gaps[i]
-                    i+=1
-            self.Itotal=0
-            self.Pout=0
-            self.stack(1) # calculate power out with average spectrum (1 bin) 
-            eff=self.Pout/P[self.d,1]/self.concentration # get efficiency
-            if (eff>effmax-self.effmin-0.01): # If gap combination is good, do more work on it
-                if int(100000*time.time() % 3000)==1: # Show calculation progress from time to time
-                    print ('Tried',ncells,', got ',nres,' candidate gap combinations.')
-                for gi,gap in enumerate(self.gaps[:-1]): # Expand edges of search space as needed
-                    if gi==0: 
-                        gapDiff=self.gaps[0]
-                        if Eshifts[0]<0.45: gapDiff=0.46
+                    s.gaps[i]=fixedGaps[i] # Any gaps with a value other than 0 are kept fixed, example: tandems.effis(gaps=[0.7,0,0,1.424,0,2.1]) .
+                if i>0 and fixedGaps.sum(): # If there are fixed gaps check gaps are not too unevenly spaced
+                    if not ( minDif_[i-1] < s.gaps[i]-lastgap < maxDif_[i-1] ): # gap difference is not in range
+                        lastgap=0 # Discard gaps and restart if gaps are too unevenly spaced
+                        i=0
                     else:
-                        gapDiff=self.gaps[gi]-self.gaps[gi-1]
-                    if Eshifts[gi]>gapDiff-0.01: Eshifts[gi]=gapDiff-0.01 # Expand edges of search space as needed
-                    if Escatter[gi]<(gapDiff-Eshifts[gi]+0.01): Escatter[gi]=(gapDiff-Eshifts[gi]+0.01) # Expand edges of search space as needed
+                        lastgap=s.gaps[i]
+                        i+=1
+                else:
+                    lastgap=s.gaps[i]
+                    i+=1
+                    
+            if s.thinning:
+                
+                bottomJts=s.junctions-s.topJunctions # index number for the bottom junction of the top stack
+                s.thin(s.junctions-1,bottomJts) # Find optimal subcell thinning for top stack for a certain spectrum
+                
+                if bottomJts>0: # if there is a lower stack
+                    exIb=s.Ijx[bottomJts]-s.Ijx[bottomJts:].min() # The excess current from the bottom junction of the top stack, goes to lower stack
+                    s.Ijx[bottomJts]-=exIb
+                    s.Ijx[bottomJts-1]+=exIb
+                    s.thin(bottomJts-1,0,None) # Find optimal subcell thinning for bottom stack. if None: use the previously specified spectrum 
+                
+            s.Itotal=0
+            s.Pout=0
+            s.stack(1) # calculate power out with average spectrum (1 bin).
+            eff=s.Pout/P[s.d,1]/s.concentration # get efficiency
+            if (eff>effmax-s.effMin-0.01): # If gap combination is good, do more work on it
+                if int(100000*time.time() % 1000)==1: # Show calculation progress from time to time
+                    print ('Tried',ncells,', got ',nres,' candidate gap combinations.')
+                for gi,gap in enumerate(s.gaps): # Expand edges of search space if any of the found gaps are near an edge
+                    if gap < Emin_[gi] + 0.01: # Expand energy range allowed for each gap as needed
+                        if Emin_[gi] > 0.5: # Only energies between 0.5 and 2.5 eV are included
+                            Emin_[gi] -= 0.01
+                    if gap > Emax_[gi] - 0.01:
+                        if Emax_[gi] < 2.5: 
+                            Emax_[gi] += 0.01
+                    if gi > 0:
+                        if gap - s.gaps[gi-1] + 0.01 > maxDif_[gi-1]: # Allow for more widely spaced gaps if needed
+                            maxDif_[gi-1] += 0.01
+                        if gap - s.gaps[gi-1] - 0.01 < minDif_[gi-1]: # Allow for more closely spaced gaps if needed
+                            minDif_[gi-1] -= 0.01
                 if (eff>effmax):
                     effmax=eff
-                self.rgaps[nres,:]=self.gaps[:-1]
-                self.effs[nres,1]=eff 
-                self.Is[nres,1]=self.Itotal 
-                for i in self.numbins: # loop for number of bins
-                    self.Itotal=0
+                s.rgaps[nres,:]=s.gaps
+                s.effs[nres,1]=eff 
+                s.Is[nres,1]=s.Itotal 
+                for i in s.bins: # loop for number of bins
+                    s.Itotal=0
                     Pin=0
-                    self.Pout=0                  
+                    s.Pout=0                  
                     for j in range(0,a1123456789[i]): # loop for bin index.    a1123456789=[1,1,2,3,4,5,6,7,8,9]
-                        self.stack(bindex[i][j]) # calculate power out for each spectra and add to Pout to calculate average efficiency
-                        Pin+=P[self.d,bindex[i][j]]
-                    self.effs[nres,i]=self.Pout/Pin/self.concentration
-                    self.auxeffs[nres,:]=np.zeros(self.junctions)+self.effs[nres,i]
-                    self.auxIs[nres,:]=np.zeros(self.junctions)+self.Itotal/a1123456789[i] # a1123456789=[1,1,2,3,4,5,6,7,8,9]
-                    self.Is[nres,i]=self.Itotal/a1123456789[i]
-                nres+=1                
+                        s.stack(bindex[i][j]) # calculate power out for each spectra and add to Pout to calculate average efficiency
+                        Pin+=P[s.d,bindex[i][j]]
+                    s.effs[nres,i]=s.Pout/Pin/s.concentration
+                    s.auxEffs[nres,:]=np.zeros(s.junctions)+s.effs[nres,i]
+                    s.auxIs[nres,:]=np.zeros(s.junctions)+s.Itotal/a1123456789[i] # a1123456789=[1,1,2,3,4,5,6,7,8,9]
+                    s.Is[nres,i]=s.Itotal/a1123456789[i]
+                nres+=1
+                                
             ncells+=1
-        mask = self.auxeffs > self.auxeffs.max()-self.effmin
-        self.rgaps = self.rgaps[mask] # Discard results below the efficiency threshold set by effmin
-        self.auxIs = self.auxIs[mask] # As a side effect of this cut off, arrays are flattened
-        self.auxeffs = self.auxeffs[mask] # [:,0]
-        threshold = self.effs[:,self.numbins[-1]].max()-self.effmin
-        mask = self.effs[:,self.numbins[-1]] > threshold
-        self.effs = self.effs[mask]
-        self.Is = self.Is[mask]
+            
+        print ('Emin',Emin_)
+        print ('Emax',Emax_)
+        print ('maxDif_',maxDif_)
+        print ('minDif_',minDif_)
+            
+        mask = s.auxEffs > s.auxEffs.max()-s.effMin
+        s.rgaps = s.rgaps[mask] # Discard results below the efficiency threshold set by effMin
+        s.auxIs = s.auxIs[mask] # As a side effect of this cut off, arrays are flattened
+        s.auxEffs = s.auxEffs[mask] # [:,0]
+        threshold = s.effs[:,s.bins[-1]].max()-s.effMin
+        mask = s.effs[:,s.bins[-1]] > threshold
+        s.effs = s.effs[mask]
+        s.Is = s.Is[mask]
         tiempo=int(time.time()-startTime)
-        res=np.size(self.rgaps)/self.junctions
+        res=np.size(s.rgaps)/s.junctions
         print ('Calculated ',ncells, ' and saved ', res, ' gap combinations in ',tiempo,' s :',res/(tiempo+1),' results/s')
-    def plot(self):
+    def plot(s):
         startTime=time.time()
-        print ('I min, I max : ',self.auxIs.min(),self.auxIs.max())
-        print ('eff min, eff max : ',self.auxeffs.min(),self.auxeffs.max())
-        res=np.size(self.rgaps)/self.junctions
+        print ('I min, I max : ',s.auxIs.min(),s.auxIs.max())
+        print ('eff min, eff max : ',s.auxEffs.min(),s.auxEffs.max())
+        res=np.size(s.rgaps)/s.junctions
         
-        #rgaps=self.rgaps.flatten() 
-        #auxeffs=self.auxeffs.flatten()
-        #rIs_=(self.auxIs[:,0]-self.auxIs[:,0].min())/(self.auxIs[:,0].max()-self.auxIs[:,0].min())
-        Is_=np.copy(self.auxIs)
+        #rgaps=s.rgaps.flatten() 
+        #auxEffs=s.auxEffs.flatten()
+        #rIs_=(s.auxIs[:,0]-s.auxIs[:,0].min())/(s.auxIs[:,0].max()-s.auxIs[:,0].min())
+        Is_=np.copy(s.auxIs)
         Is_=(Is_-Is_.min())/(Is_.max()-Is_.min())
-        srIs_=(self.Is[:,self.numbins[-1]]-self.Is[:,self.numbins[-1]].min())/(self.Is[:,self.numbins[-1]].max()-self.Is[:,self.numbins[-1]].min())
-        if self.convergence:
+        srIs_=(s.Is[:,s.bins[-1]]-s.Is[:,s.bins[-1]].min())/(s.Is[:,s.bins[-1]].max()-s.Is[:,s.bins[-1]].min())
+        if s.convergence:
             plt.figure()
             plt.xlabel('Number of spectral bins')
             plt.ylabel('Absolute efficiency change \n by increasing number of bins (%)')
             for i in range(0,int(res)):
                 diffs=[]
-                for j in self.numbins[:-1]:
-                    diffs.append(100*(self.effs[i,j+1]-self.effs[i,j]))
-                plt.plot(self.numbins[:-1],diffs,color=LGBT(srIs_[i]),linewidth=0.1) #  color=LGBT(auxIs[i*self.junctions])
-            plt.savefig('Convergence '+self.name+' '+str(int(self.junctions))+' '+str(int(self.numTop))+' '+str(int(self.concentration))+' '+str(int(startTime)),dpi=600)
+                for j in s.bins[:-1]:
+                    diffs.append(100*(s.effs[i,j+1]-s.effs[i,j]))
+                plt.plot(s.bins[:-1],diffs,color=LGBT(srIs_[i]),linewidth=0.1) #  color=LGBT(auxIs[i*s.junctions])
+            plt.savefig('lat50/Convergence '+s.name+' '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+str(int(startTime)),dpi=600)
             plt.show()
         plt.figure()
-        plt.ylim(100*(self.effs[:,self.numbins[-1]].max()-self.effmin),100*self.effs[:,self.numbins[-1]].max()+0.1)
-        plt.xlim(0.4,2.6)
+        plt.ylim(100*(s.effs[:,s.bins[-1]].max()-s.effMin),100*s.effs[:,s.bins[-1]].max()+0.1)
+        plt.xlim(0.5,2.5)
         #plt.grid(True)
         plt.minorticks_on()
         plt.tick_params(direction='out',which='minor')
@@ -340,33 +431,33 @@ class effis(object):
         plt.ylabel('Yearly averaged efficiency (%)')
         plt.xlabel('Energy gaps (eV)')
         plt.plot([0.50,0.50],[0,100],c='grey',linewidth=0.5)
-        plt.text(0.5,100*self.auxeffs.max()+.2,'A')
+        plt.text(0.5,100*s.auxEffs.max()+.2,'A')
         plt.plot([0.69,0.69],[0,100],c='grey',linewidth=0.5)
-        plt.text(0.69,100*self.auxeffs.max()+.2,'B')
+        plt.text(0.69,100*s.auxEffs.max()+.2,'B')
         plt.plot([0.92,0.92],[0,100],c='grey',linewidth=0.5)
-        plt.text(0.92,100*self.auxeffs.max()+.2,'C')
+        plt.text(0.92,100*s.auxEffs.max()+.2,'C')
         plt.plot([1.1,1.1],[0,100],c='grey',linewidth=0.5)
-        plt.text(1.1,100*self.auxeffs.max()+.2,'D')
+        plt.text(1.1,100*s.auxEffs.max()+.2,'D')
         plt.plot([1.33,1.33],[0,100],c='grey',linewidth=0.5)
-        plt.text(1.33,100*self.auxeffs.max()+.2,'E1')
+        plt.text(1.33,100*s.auxEffs.max()+.2,'E1')
         plt.plot([1.63,1.63],[0,100],c='grey',linewidth=0.5)
-        plt.text(1.63,100*self.auxeffs.max()+.2,'E2')
-        plt.scatter(self.rgaps,100*self.auxeffs,c=Is_,s=70000/len(self.effs[:,self.numbins[-1]]), edgecolor='none', cmap=LGBT)
+        plt.text(1.63,100*s.auxEffs.max()+.2,'E2')
+        plt.scatter(s.rgaps,100*s.auxEffs,c=Is_,s=70000/len(s.effs[:,s.bins[-1]]), edgecolor='none', cmap=LGBT)
 
-        #if not self.convergence:
-        plt.savefig(self.name+' '+str(int(self.junctions))+' '+str(int(self.numTop))+' '+str(int(self.concentration))+' '+str(int(startTime)),dpi=600)
+        #if not s.convergence:
+        plt.savefig('lat50/'+s.name+' '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+str(int(startTime)),dpi=600)
         plt.show()        
-        plt.xlim(100*(self.auxeffs.max()-self.effmin),100*self.auxeffs.max())
+        plt.xlim(100*(s.auxEffs.max()-s.effMin),100*s.auxEffs.max())
         plt.xlabel('Yearly averaged efficiency (%)')
         plt.ylabel('Count')
-        plt.hist(100*self.effs[:,self.numbins[-1]], bins=30)
-        #if not self.convergence:
-        plt.savefig('Hist Eff '+self.name+' '+str(int(self.junctions))+' '+str(int(self.numTop))+' '+str(int(self.concentration))+' '+str(int(startTime)),dpi=600)      
+        plt.hist(100*s.effs[:,s.bins[-1]], bins=30)
+        #if not s.convergence:
+        plt.savefig('lat50/Hist Eff '+s.name+' '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+str(int(startTime)),dpi=600)      
         plt.show()
-    def save(self):
-        with open(self.name+' '+str(int(self.junctions))+' '+str(int(self.numTop))+' '+str(int(self.concentration))+' '+str(int(time.time())), "w") as f:
-            f.write(json_tricks.dumps(self))
-    def load(self,fname):
+    def save(s):
+        with open(s.name+' '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+str(int(time.time())), "w") as f:
+            f.write(json_tricks.dumps(s))
+    def load(s,fname):
         with open(fname,"r") as f:
             t0=f.readlines()
             t0=''.join(t0)
