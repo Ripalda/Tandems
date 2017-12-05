@@ -129,7 +129,7 @@ class effs(object):
     cells = 1000 # Desired number of calculated tandem cells. Will not exactly match number of returned results.
     R = 5e-7 # Series resistance of each stack in Ohm*m2. Default is optimistic value for high concentration devices
     # R = 4e-5 is suggested as optimistic value for one sun flat plate devices
-    EQE = 0 # This is set in __init__, type show_assumptions() to see actual EQE
+    EQE = np.exp(-((Energies-1.7)/2.2)**6) # Optimistic EQE model, 74% at 3.5 eV, >99% from 2.5 to 0.9 eV, 96% at 0.4 eV. Type show_assumptions() to see plot of this EQE
     mirrorLoss = 1 # This value implies the assumption that back mirror loss = loss due to an air gap.
     opticallyCoupledStacks = False # Bottom junction of the top terminal stack can either have photon recycling or radiative coupling to the botttom stack. 
     specsFile = 'lat40.npy' # Name of the file with the spectral set obtained from tandems.generate_spectral_bins()
@@ -161,8 +161,6 @@ class effs(object):
     
     def __init__(s, **kwargs):
         """ Call this to change input parameters without discarding previously found gaps before calling recalculate() """ 
-        s.EQE = np.exp(-((Energies-1.7)/2.2)**6) # Optimistic default EQE model, 74% at 3.5 eV, >99% from 2.5 to 0.9 eV, 96% at 0.4 eV
-        # can do effs( EQE = 1 ) to override this default. Any array with the same length as the spectra will do too
         for k, v in kwargs.items():
             setattr(s, k, v)
         if type(s.bins)==int:
@@ -269,7 +267,7 @@ class effs(object):
             Ijmin = Ij[bottomJ:topJ+1].min() # Min current in series connected stack
             I = Ijmin*np.arange(0.8,1,0.0001) # IV curve sampling   
             for i in range(topJ,bottomJ-1,-1): # From top to bottom: Sample IV curve, get I0
-                if (i == bottomJ) and not opticallyCoupledStacks: # The bottom junction of each series connected stack has photon recycling due to partial back reflection of luminescence
+                if (i == bottomJ) and not s.opticallyCoupledStacks: # The bottom junction of each series connected stack has photon recycling due to partial back reflection of luminescence
                     backLoss = s.mirrorLoss # This is the electroluminescence photon flux lost at the back of the bottom junction normalized to ERE
                 else:
                     backLoss = s.beta # This is the electroluminescence photon flux lost to the next lower junction
@@ -294,7 +292,7 @@ class effs(object):
         # T = 70 for a 1mm2 cell at 1000 suns bonded to copper substrate. Cite I. Garcia, in CPV Handbook, ed. by: I. Rey-Stolle, C. Algora
         s.getIjx(spec) # Get external photocurrents
         s.serie(s.junctions-1,s.junctions-s.topJunctions) # Add efficiency from top stack, topJunctions is number of juntions in top stack
-        if not opticallyCoupledStacks:
+        if not s.opticallyCoupledStacks:
             s.Irc = 0
         s.serie(s.junctions-s.topJunctions-1,0) # Add efficiency from bottom stack
         return
@@ -359,7 +357,7 @@ class effs(object):
             
             if (eff>effmax-s.effMin-0.01): # If gap combination is good, do more work on it
                 if int(100000*time.time() % 1000) == 1: # Show calculation progress from time to time
-                    print ('Tried',ncells,', got ',nres,' candidate gap combinations.')
+                    print ('Tried',ncells,', got ',nres,' candidate gap combinations.', end="\r")
                 for gi,gap in enumerate(s.gaps): # Expand edges of search space if any of the found gaps are near an edge
                     if gap < Emin_[gi] + 0.01: # Expand energy range allowed for each gap as needed
                         if Emin_[gi] > 0.5: # Only energies between 0.5 and 2.5 eV are included
@@ -391,11 +389,6 @@ class effs(object):
                 nres += 1
                                 
             ncells += 1
-            
-        print ('Emin',Emin_)
-        print ('Emax',Emax_)
-        print ('maxDif_',maxDif_)
-        print ('minDif_',minDif_)
         
         mask = s.auxEffs > s.auxEffs.max()-s.effMin
         s.rgaps = s.rgaps[mask] # Discard results below the efficiency threshold set by effMin
@@ -415,11 +408,17 @@ class effs(object):
         tiempo = int(time.time()-startTime)
         res = np.size(s.rgaps)/s.junctions
         print ('Calculated ',ncells, ' and saved ', res, ' gap combinations in ',tiempo,' s :',res/(tiempo+1),' results/s')
+        s.results()
+    def results(s):
+        """ After findGaps() or recalculate(), or load(), this function shows the main results """
+        print ('Maximum Efficiency:',s.auxEffs.max())
+        imax = np.argmax(s.auxEffs[:,0])
+        print ('Optimal gaps:', s.rgaps[imax])
+        print ('Isc for optimal gaps (A/m2):', s.auxIs[imax,0])
+        print ('Isc range (A/m2):',s.auxIs.min(),'-',s.auxIs.max())
     def plot(s):
         """ Saves efficiency plots to PNG files """ 
         startTime = time.time()
-        print ('I min, I max : ',s.auxIs.min(),s.auxIs.max())
-        print ('eff min, eff max : ',s.auxEffs.min(),s.auxEffs.max())
         res = np.size(s.rgaps)/s.junctions
         Is_ = np.copy(s.auxIs)
         Is_ = (Is_-Is_.min())/(Is_.max()-Is_.min())
@@ -457,16 +456,13 @@ class effs(object):
         plt.plot([1.63,1.63],[0,100],c='grey',linewidth=0.5)
         plt.text(1.63,100*s.auxEffs.max()+.2,'E2')
         plt.scatter(s.rgaps,100*s.auxEffs,c=Is_,s=70000/len(s.effs[:,s.bins[-1]]), edgecolor='none', cmap=LGBT)
-
-        #if not s.convergence:
         plt.savefig(s.name+' '+s.specsFile.replace('.npy','')+' '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+str(int(startTime)),dpi=600)
         plt.show()        
         plt.xlim(100*(s.auxEffs.max()-s.effMin),100*s.auxEffs.max())
         plt.xlabel('Yearly averaged efficiency (%)')
         plt.ylabel('Count')
         plt.hist(100*s.effs[:,s.bins[-1]], bins=30)
-        #if not s.convergence:
-        plt.savefig(s.name+' '+s.specsFile.replace('.npy','')+' '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+str(int(startTime)),dpi=600)      
+        plt.savefig(s.name+' Hist '+s.specsFile.replace('.npy','')+' '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+str(int(startTime)),dpi=600)      
         plt.show()
     def save(s):
         """ Saves data for later reuse/replotting. Path and file name set in eff.name, some parameters and timestamp are appended to filename """
@@ -493,6 +489,7 @@ class effs(object):
                 s.auxEffs[gi,:] = np.zeros(s.junctions)+s.effs[gi,i]
                 s.auxIs[gi,:] = np.zeros(s.junctions)+s.Itotal/a1123456789[i] # a1123456789 = [1,1,2,3,4,5,6,7,8,9]
                 s.Is[gi,i] = s.Itotal/a1123456789[i]
+        s.results()
     def compare(s,s0): 
         """ Plots relative differences of effiency for two results sets based on the same set of optimal band gap combinations. """
         startTime = time.time()
