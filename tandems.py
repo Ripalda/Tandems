@@ -102,6 +102,7 @@ class effs(object):
     
     eff = tandems.effs() # Create object instance
     eff = eff.load('/path/and file name here') # Use previusly created object instance as container for loaded data
+    eff.results()
     eff.plot()
     """
 
@@ -184,20 +185,21 @@ class effs(object):
             s.bins = [1,2,3,4,5,6,7,8,9]
         if s.concentration>1:
             s.d = 1 # use direct spectra
+        else:
+            s.d = 0
             
     def intSpec(s,energy,spec): 
         """ Returns integrated photocurrent from given photon energy to UV """
         return np.interp(1e9*hc/energy/q,wavel,s.Iscs[s.d,spec,:]) # interpolate integrated spectra. Wavelength in nm
     def getIjx(s,spec):
-        """ Get current absorbed in each junction, external photocurrent only """
+        """ Get current absorbed in each junction, external photocurrent including junction transmission due to finite thickness """
         s.Ijx = np.zeros(s.junctions)
         IfromTop = 0
-        upperIUVE = 0
+        upperIntSpec = 0
         for i in range(s.junctions-1,-1,-1): # From top to bottom: get external photocurrent in each junction
-            IUVE = s.intSpec(s.gaps[i]+Varshni(s.T),spec) # IUVE = Integrated current from UV to given Energy gap
-            Ijx0 = s.concentration*(IUVE-upperIUVE) # Get external I per junction 
-            #print (i,s.gaps[i],IUVE,IUVE-previousIUVE)
-            upperIUVE = IUVE
+            IntSpec = s.intSpec(s.gaps[i]+Varshni(s.T),spec) # IntSpec = Integrated current from UV to given Energy gap
+            Ijx0 = s.concentration*(IntSpec-upperIntSpec) # Get external I per junction 
+            upperIntSpec = IntSpec
             if i != 0:
                 s.Ijx[i] = (1-s.transmission)*Ijx0+IfromTop # Subcell thickness cannot be infinite, 3 micron GaAs has transmission in the 2 to 3 % range (depending on integration range)
                 IfromTop = s.transmission*Ijx0
@@ -506,7 +508,7 @@ class effs(object):
         plt.tick_params(direction='out',which='minor')
         plt.tick_params(direction='inout',pad=6)
         plt.ylabel('Efficiency change (%)')
-        plt.xlabel('Current (A/m2)')
+        plt.xlabel('Current $\mathregular{(\hspace{0.5} A/m^2)}$')
         plt.scatter(s0.auxIs , diff , c=Is_ , s=10000/len(s.effs[:,s.bins[-1]]) , edgecolor='none', cmap=LGBT)
         #plt.scatter(s0.auxIs , diff , c=Is_ , s=10*((s0.auxEffs-s0.auxEffs.min())/(s0.auxEffs.max()-s0.auxEffs.min()))**2 , edgecolor='none', cmap=LGBT)
         plt.savefig(s.name+'-'+s0.name.replace('/','').replace('.','')+' '+s.specsFile.replace('.npy','').replace('/','').replace('.','')+'-'+s0.specsFile.replace('.npy','').replace('/','').replace('/','')+' '+str(int(s0.junctions))+' '+str(int(s0.topJunctions))+' '+str(int(s0.concentration))+' '+str(int(startTime)),dpi=600)
@@ -551,7 +553,7 @@ def show_assumptions(): # Shows the used EQE model and the AOD and PW statistica
     sali = plt.hist(lrnd,bins=40)
     plt.show()
 
-def generate_spectral_bins(latMin=40 , latMax=40, longitude='random', AOD='random', PW='random', tracking=True, fname='Iscs'):
+def generate_spectral_bins(latMin=40 , latMax=40, longitude='random', AOD='random', PW='random', tracking='38 -999 -999', fname='Iscs'):
     # NECESARY CHANGES IN SMARTS 2.9.5 SOURCE CODE
     # Line 189
     #       batch = .TRUE.
@@ -561,6 +563,8 @@ def generate_spectral_bins(latMin=40 , latMax=40, longitude='random', AOD='rando
     # 103  FORMAT(//,'Zenit  =  ',F6.2,' is > 75.5224 deg. (90 in original code) This is equivalent to AM < 4'
     # This change is needed because trackers are shadowed by neighboring trackers when the sun is near the horizon. 
     # Zenit 80 is already too close to the horizon to use in most cases due to shadowing issues.
+    # tracking='38 -999 -999' for 2 axis tracking. tracking='38 37 -999' for 1 axis tracking. '38 37 180' for fixed panel. 
+    # 37 is near optimal tilt only for a certain range of lattitudes. 180 is for northern hemisphere.
 
     numres = 20000 # number of generated spectra
 
@@ -579,8 +583,7 @@ def generate_spectral_bins(latMin=40 , latMax=40, longitude='random', AOD='rando
         t0 = fil.readlines()
     t0 = ''.join(t0)
     sc = 0
-    if not tracking:
-         t0 = t0.replace('38 -999 -999','38 37 180')
+    t0 = t0.replace('38 -999 -999',tracking)
     for i in range(0,numres):
         tama = 0
         while tama == 0: # Generate random time, location, AOD, PW

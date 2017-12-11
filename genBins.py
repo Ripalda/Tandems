@@ -6,7 +6,10 @@ import tandems
 tandems.generate_spectral_bins(latMin=40,latMax=40,fname='lat40') 
 
 # No tracking for global spectra, plane tilted 37 degrees
-tandems.generate_spectral_bins(latMin=40,latMax=40,tracking=False,fname='lat40tilted')
+tandems.generate_spectral_bins(latMin=40,latMax=40,tracking='38 37 180',fname='lat40tilted')
+
+# 1 axis azimutal tracking for global spectra, plane tilted 37 degrees
+tandems.generate_spectral_bins(latMin=40,latMax=40,tracking='38 37 -999',fname='lat401axis')
 
 # Lattitude = 60
 tandems.generate_spectral_bins(latMin=60,latMax=60,fname='lat60')
