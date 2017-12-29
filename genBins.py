@@ -2,6 +2,18 @@
 
 import tandems
 
+# Use spectra from National Solar Resource DataBase
+tandems.generate_spectral_bins(NSRDBfile='Reno.csv')
+
+# Use spectra from National Solar Resource DataBase
+tandems.generate_spectral_bins(NSRDBfile='Boulder.csv')
+
+# Use spectra from National Solar Resource DataBase
+tandems.generate_spectral_bins(NSRDBfile='Indianapolis.csv')
+
+# Use spectra from National Solar Resource DataBase
+tandems.generate_spectral_bins(NSRDBfile='Philadelphia.csv')
+
 # Fixed lattitude, tracking for both global and direct spectra, random AOD and PW
 tandems.generate_spectral_bins(latMin=40,latMax=40,fname='lat40') 
 
@@ -23,7 +35,7 @@ tandems.generate_spectral_bins(latMin=40,latMax=40,fname='lat40lowAOD',AOD=0.084
 # Random locations with -50 < Lattitude < 50
 tandems.generate_spectral_bins(latMin=-50,latMax=50,fname='randomLocations')
 
-# FUNCTION tandems.generate_spectral_bins(latMin=40 , latMax=40, longitude='random', AOD='random', PW='random', tracking=True, fname='Iscs')
+# FUNCTION tandems.generate_spectral_bins(latMin=40 , latMax=40, longitude='random', AOD='random', PW='random', tracking=True, NSRDBfile='', fname='Iscs')
 
 #    Generates a file with a complete set of binned averaged spectra for yearly energy yield calculations
 #    Location can be randomized within given lattitude limits: latMin, latMax.
