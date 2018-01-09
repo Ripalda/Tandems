@@ -138,7 +138,7 @@ class effs(object):
     mirrorLoss = 1 # Default value = 1 implies the assumption that back mirror loss = loss due to an air gap.
     opticallyCoupledStacks = False # Bottom junction of the top terminal stack can either have photon recycling or radiative coupling to the botttom stack. 
     coe = 0.9 # Concentrator optical efficiency. Optimistic default value. Used only for yield calculation.
-    cloudCover = 0.26 # Fraction of the yearly energy that is lost due to clouds. Set to 0 if using experimental spectra. Location dependent, used only for yield calculation. Default value 0.26 is representative of area near Denver, CO.
+    cloudCover = 0.26 # Fraction of the yearly energy that is lost due to clouds. Location dependent, used only for yield calculation. Default value 0.26 is representative of area near Denver, CO.
     # If using experimental spectra, set cloudCover = 0. If temporal resolution is low, it might be appropriate to set Tmin = Tmin + deltaT to keep T constant.
     specsFile = 'lat40.npy' # Name of the file with the spectral set obtained from tandems.generate_spectral_bins(). See genBins.py
     
