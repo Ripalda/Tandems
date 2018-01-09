@@ -134,11 +134,11 @@ class effs(object):
     cells = 1000 # Desired number of calculated tandem cells. Will not exactly match number of returned results.
     R = 5e-7 # Series resistance of each stack in Ohm*m2. Default is optimistic value for high concentration devices
     # R = 4e-5 is suggested as optimistic value for one sun flat plate devices
-    EQE = np.exp(-((Energies-1.7)/2.2)**6) # Optimistic EQE model, 74% at 3.5 eV, >99% from 2.5 to 0.9 eV, 96% at 0.4 eV. Type show_assumptions() to see plot of this EQE
-    mirrorLoss = 1 # This value implies the assumption that back mirror loss = loss due to an air gap.
+    EQE = 0.7453*np.exp(-((Energies-1.782)/1.384)**4)+0.1992 # EQE model fitted to current record device, DOI.: 10.1109/JPHOTOV.2015.2501729
+    mirrorLoss = 1 # Default value = 1 implies the assumption that back mirror loss = loss due to an air gap.
     opticallyCoupledStacks = False # Bottom junction of the top terminal stack can either have photon recycling or radiative coupling to the botttom stack. 
     coe = 0.9 # Concentrator optical efficiency. Optimistic default value. Used only for yield calculation.
-    cloudCover = 0.4 # Fraction of the time that the sun is obscured by clouds. Location dependent, used only for yield calculation.
+    cloudCover = 0.26 # Fraction of the yearly energy that is lost due to clouds. Set to 0 if using experimental spectra. Location dependent, used only for yield calculation. Default value 0.26 is representative of area near Denver, CO.
     # If using experimental spectra, set cloudCover = 0. If temporal resolution is low, it might be appropriate to set Tmin = Tmin + deltaT to keep T constant.
     specsFile = 'lat40.npy' # Name of the file with the spectral set obtained from tandems.generate_spectral_bins(). See genBins.py
     
@@ -527,14 +527,14 @@ class effs(object):
 # ---- End of Class effs ----
 
 def show_assumptions(): # Shows the used EQE model and the AOD and PW statistical distributions 
-    EQE = np.exp(-((Energies-1.7)/2.2)**6) # Default EQE
+    s0 = effs()
     plt.figure()
     plt.xlim(0.4, 4)
     plt.ylim(0, 1)
-    plt.title('Optimistic EQE model used in calculations \n Higher at all energies than any reported multijunction')
+    plt.title('EQE model fitted to record device with 46% eff. \n DOI.: 10.1109/JPHOTOV.2015.2501729')
     plt.ylabel('External Quantum Efficiency')
     plt.xlabel('Photon energy (eV)')
-    plt.plot(Energies, EQE)
+    plt.plot(Energies, s0.EQE)
     plt.show()
     
     #AOD random distribution used here is fitted to histograms by Jaus and Gueymard based on Aeronet data
