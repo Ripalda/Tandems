@@ -22,7 +22,10 @@ import scipy.constants as con
 hc = con.h*con.c
 q = con.e
 
-np.set_printoptions(precision=3) # Print 4 decimal places only
+version = 1
+print ('Tandems version',version)
+
+np.set_printoptions(precision=3) # Print 3 decimal places only
 
 colors = [(1, 0, 1), (0, 0, 1), (0, 1, 1), (0, 1, 0), (1, 1, 0), (1, 0, 0)]  # B -> G -> R
 LGBT = LinearSegmentedColormap.from_list('LGBT', colors, 500)
