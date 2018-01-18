@@ -19,27 +19,7 @@ eff = tandems.load('/path/and file name here') # Load previusly saved data
 eff.results()
 eff.plot()
 
-# The .npy files with the spectra used to calculate the yearly average efficiency have been generated like this:
-
-# Fixed lattitude, tracking for both global and direct spectra, random AOD and PW
-tandems.generate_spectral_bins(latMin=40,latMax=40,fname='lat40') 
-
-# No tracking for global spectra, plane tilted 37 degrees
-tandems.generate_spectral_bins(latMin=40,latMax=40,tracking=False,fname='lat40tilted')
-
-# Lattitude = 60
-tandems.generate_spectral_bins(latMin=60,latMax=60,fname='lat60')
-
-# Lattitude = 0
-tandems.generate_spectral_bins(latMin=0,latMax=0,fname='lat0')
-
-# Fixed AOD and PW
-tandems.generate_spectral_bins(latMin=40,latMax=40,fname='lat40lowAOD',AOD=0.084,PW=1.416)
-
-# Random locations with -50 < Lattitude < 50
-tandems.generate_spectral_bins(latMin=-50,latMax=50,fname='randomLocations')
-
-Other examples can be found in genBins.py
+# The .npy files with the spectra used to calculate the yearly average efficiency have been generated with genBins.py
 
 ---- CONTENTS OF tandems PYTHON MODULE ----
 

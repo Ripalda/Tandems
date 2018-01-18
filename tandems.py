@@ -422,9 +422,11 @@ class effs(object):
         res = np.size(s.rgaps)/s.junctions
         print ('Calculated ', ncells, ' and saved ', res, ' gap combinations in ', tiempo, ' s :', res/(tiempo+1), ' results/s')
         s.results()
+        
     def kWh(s, efficiency):
         """Converts efficiency values to yearly energy yield in kWh/m2"""
         return 365.25*24 * s.P[s.d,1] * efficiency * (1 - s.cloudCover) * s.daytimeFraction / 1000
+        
     def results(s):
         """ After findGaps() or recalculate(), or load(), this function shows the main results """
         print ('Maximum efficiency:', s.auxEffs.max())
@@ -433,6 +435,7 @@ class effs(object):
         print ('Optimal gaps:', s.rgaps[imax])
         print ('Isc for optimal gaps (A/m2):', s.auxIs[imax, 0])
         print ('Isc range (A/m2):', s.auxIs.min(), '-', s.auxIs.max())
+        
     def plot(s):
         """ Saves efficiency plots to PNG files """ 
         res = np.size(s.rgaps)/s.junctions
@@ -442,7 +445,7 @@ class effs(object):
         if s.convergence:
             plt.figure()
             plt.xlabel('Number of spectral bins')
-            plt.ylabel('Absolute efficiency change \n by increasing number of bins (%)')
+            plt.ylabel('Efficiency change (%)') # Absolute efficiency change by increasing number of bins (%)
             for i in range(0, int(res)):
                 diffs = []
                 for j in s.bins[:-1]:
@@ -485,10 +488,12 @@ class effs(object):
         plt.hist(100*s.effs[:, s.bins[-1]], bins=30)
         plt.savefig(s.name+' Hist '+s.specsFile.replace('.npy', '')+' '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+str(int(s.timeStamp)), dpi=600)      
         plt.show()
+        
     def save(s):
         """ Saves data for later reuse/replotting. Path and file name set in eff.name, some parameters and timestamp are appended to filename """
         with open(s.name+' '+s.specsFile.replace('.npy', '')+' '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+str(int(s.timeStamp)), "w") as f:
             f.write(json_tricks.dumps(s))
+            
     def recalculate(s):
         """ Recalculate efficiencies with new set of input parameters using previously found gaps. Call __init__() to change parameters before recalculate() """
         for gi in range(0, s.rgaps.shape[0]):
@@ -505,6 +510,7 @@ class effs(object):
                 s.auxIs[gi, :] = np.zeros(s.junctions)+s.Itotal/a1123456789[i] # a1123456789 = [1, 1, 2, 3, 4, 5, 6, 7, 8, 9]
                 s.Is[gi, i] = s.Itotal/a1123456789[i]
         s.results()
+        
     def compare(s, s0): 
         """ Plots relative differences of effiency for two results sets based on the same set of optimal band gap combinations. """
         print ('I min, I max : ', s.auxIs.min(), s.auxIs.max())
