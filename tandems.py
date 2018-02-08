@@ -1,8 +1,8 @@
 # Random sampling of multijunction photovoltaic efficiencies. Jose M. Ripalda
-# Requires doing "pip install json_tricks" before running
 # Tested with Python 2.7 and 3.6
-# SMARTS 2.9.5 is required only to generate a new set of random spectra.
-# Provided files with ".npy" extension can be used instead of SMARTS to load a set of binned spectra.
+# Requires installing json_tricks
+# SMARTS 2.9.5 and sklearn are required only to generate new sets of spectra.
+# Provided files with ".npy" extension can be used instead to load a set of spectra.
 
 from __future__ import absolute_import
 from __future__ import division
@@ -13,16 +13,18 @@ from matplotlib.colors import LinearSegmentedColormap
 import time
 import pdb
 import json_tricks
-import copy
+from copy import deepcopy
 import os.path
 import subprocess as sub
 from datetime import datetime
 from scipy import integrate
+from sklearn.cluster import FeatureAgglomeration
+from sklearn.cluster import KMeans
 import scipy.constants as con
 hc = con.h*con.c
 q = con.e
 
-version = 1
+version = 27
 print ('Tandems version',version)
 
 np.set_printoptions(precision=3) # Print 3 decimal places only
@@ -33,16 +35,21 @@ LGBT = LinearSegmentedColormap.from_list('LGBT', colors, 500)
 # Load standard reference spectra ASTM G173
 wavel, g1_5, d1_5 = np.loadtxt("AM1_5 smarts295.ext.txt", delimiter=',', usecols=(0,1,2), unpack=True)
 Energies = 1e9*hc/q/wavel # wavel is wavelenght in nm
-a1123456789 = [1, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
-bindex = [] # "2D Array for spectral bin indexing. First index is number of bins, second is bin index. Returns a spectrum index for input in specs array.
-bindex.append([0])
-k = 1
-for i in range(1, 10): #bin set
-    bindex.append([])
-    for j in range(0, i): #bin counter
-        bindex[i].append(k)
-        k += 1
+specIndexArray = [] # "2D Array for spectral bin indexing. First index is number of bins, second is bin index. 
+specIndexArray.append([0])
+specIndex = 1
+for numBins in range(1, 21): #bin set
+    specIndexArray.append([])
+    for binIndex in range(0, numBins): #bin counter
+        specIndexArray[numBins].append(specIndex)
+        specIndex += 1
+        
+def getSpectrumIndex(numBins,binIndex): # Returns a spectrum index for input in spectra array.
+    if numBins>20: # Use full set of spectra
+        return binIndex+211
+    else: # Use averaged spectra
+        return specIndexArray[numBins][binIndex]
 
 # These arrays are used to speed up calculations by limiting the energy gap search space.
 # Initial guess at where the eff maxima are.
@@ -123,18 +130,18 @@ class effs(object):
     gaps = [0, 0, 0, 0, 0, 0] # If a gap is 0, it is randomly chosen by tandems.findGaps(), otherwise it is kept fixed at value given here.
     ERE = 0.01 #external radiative efficiency without mirror. With mirror ERE increases by a factor (1 + beta)
     beta = 11 #n^2 squared refractive index  =  radiative coupling parameter  =  substrate loss.
-    bins = 8 # bins is number of spectra used to evaluate eff, an array can be used to test the effect of the number of spectral bins. See convergence = True. 
-    Tmin = 15+273.15 # Minimum ambient temperature at night in K
-    deltaT = np.array([30, 55]) # Device T increase over Tmin caused by high irradiance (1000 W/m2), first value is for flat plate cell, second for high concentration cell
-    convergence = False # Set to True to test the effect of changing the number of spectral bins  used to calculate the yearly average efficiency
+    bins = 8 # bins is number of spectra used to evaluate eff. See convergence = True. 
+    Tmin = 15+273.15 # Minimum cell temperature at zero irradiance in K
+    deltaT = np.array([30, 55]) # Device T increase over Tmin caused by high irradiance (1000 W/m2), first value is for one sun cell, second for high concentration cell
+    convergence = False # Set to True to test the effect of changing the number of spectral bins used to calculate the yearly average efficiency
     transmission = 0.02 # Subcell thickness cannot be infinite, 3 micron GaAs has transmission in the 2 to 3 % range (depending on integration range)
     thinning = False # Automatic subcell thinning for current matching
-    thinSpec = 1 # Spectrum used to calculate subcell thinning for current matching. Integer index in specs array. 
+    thinSpec = 1 # Spectrum used to calculate subcell thinning for current matching. Integer index in spectra array. 
     effMin = 0.02 # Lowest sampled efficiency value relative to maximum efficiency. Gaps with lower efficiency are discarded.
     d = 1 # 0 for global spectra, 1 for direct spectra
     # T = 70 for a 1mm2 cell at 1000 suns bonded to copper substrate. Cite I. Garcia, in CPV Handbook, ed. by: I. Rey-Stolle, C. Algora
     name = './Test' # Can optionally include path to destination of generated files. Example: "/home/documents/test". Some parameters and timestamp are appended to filename
-    cells = 1000 # Desired number of calculated tandem cells. Will not exactly match number of returned results.
+    cells = 1000 # Target number of calculated tandem cells. Actual number of results will be less.
     R = 5e-7 # Series resistance of each stack in Ohm*m2. Default is optimistic value for high concentration devices
     # R = 4e-5 is suggested as optimistic value for one sun flat plate devices
     EQE = 0.7453*np.exp(-((Energies-1.782)/1.384)**4)+0.1992 # EQE model fitted to current record device, DOI.: 10.1109/JPHOTOV.2015.2501729
@@ -143,7 +150,8 @@ class effs(object):
     coe = 0.9 # Concentrator optical efficiency. Optimistic default value. Used only for yield calculation.
     cloudCover = 0.26 # Fraction of the yearly energy that is lost due to clouds. Location dependent, used only for yield calculation. Default value 0.26 is representative of area near Denver, CO.
     # If using experimental spectra, set cloudCover = 0. If temporal resolution is low, it might be appropriate to set Tmin = Tmin + deltaT to keep T constant.
-    specsFile = 'lat40.npy' # Name of the file with the spectral set obtained from tandems.generate_spectral_bins(). See genBins.py
+    specsFile = 'latitude40.clusters.npy' # Name of the file with the spectral set obtained from tandems.generate_spectral_bins(). See genBins.py
+    # File types for spectral sets should either be .clusters.npy or .bins.npy
     
     # ---- Results ----
     
@@ -156,16 +164,17 @@ class effs(object):
     Irc = 0 # Radiative coupling current
     Itotal = 0 # Isc
     Pout = 0 # Power out
-    Ijx = 0 # Array with the external photocurrents integrated from spectrum. Is set by getIjx()
     T = 0 # Set from irradiance at run time
     auxEffs = 0 # Aux array for efficiencies. Has the same shape as rgaps for plotting and array masking. 
     auxIs = 0 # Aux array for plotting. sum of short circuit currents from all terminals.
-    specs = [] # Spectral set loaded from file
+    spectra = [] # Spectral set loaded from file
     P = [] # Array with integrated power in each spectrum
     Iscs = [] # Array with current in each spectrum
     thinTrans = 1 # Array with transmission of each subcell
     timeStamp = 0
     daytimeFraction = 1
+    numSpectra = [1]+list(range(1,21))+[10000] # Number of spectra as a function of numBins
+    timePerCluster = 0 # Fraction of the yearly daytime hours that is represented by each cluster of spectra. Set in __init__ 
     
     # ---- Methods and functions ----
     
@@ -176,82 +185,121 @@ class effs(object):
             setattr(s, k, v)
         if type(s.bins)==int:
             s.bins = [s.bins]
+        
+        if '.clusters.npy' in s.specsFile:
+            s.timePerCluster = np.load(s.specsFile.replace('.clusters.','.timePerCluster.')) # Fraction of the yearly daytime hours that is represented by each cluster of spectra
+            s.timePerCluster[0, 0] = 1 # These are for the standard reference spectra ASTM G173.
+            s.timePerCluster[1, 0] = 1
+        elif '.bins.npy' not in s.specsFile:
+            print('File types for spectral sets should either be .clusters.npy or .bins.npy')
+            exit()            
+
+        s.spectra = np.load(s.specsFile) # Load binned or clustered spectra
+        s.daytimeFraction = s.spectra[0, 0, -1] # This is the fraction of daytime hours in a year and is needed to calculate the yearly averaged power yield including night time hours. 
+        s.spectra[0, 0, -1] = 0
+        s.spectra[0, 0, :] = g1_5 # These are for the standard reference spectra ASTM G173.
+        s.spectra[1, 0, :] = d1_5
+        
+        if s.convergence:
+            s.bins =  list(range(1,20))+[21,20]  # bin 21 is the full set of spectra, bin 1 is the average
+            fullSpecs = np.load(s.specsFile.replace('.clusters.npy','.full.npy').replace('.bins.npy','.full.npy'))
+            s.spectra = np.concatenate((s.spectra, fullSpecs), axis=1)
+            s.spectra[-1,-1,-1] = 0 # The last element is not needed here. It is the total number of attempts to generate spectra with SMARTS
+            s.numSpectra[-1] = fullSpecs.shape[1]        
+        
+        s.Iscs = np.copy(s.spectra)
+        s.P = np.zeros((2, s.spectra.shape[1]))
             
-        s.specs = np.load(s.specsFile) # Load binned spectra
-        s.daytimeFraction = s.specs[0, 0, -1] # This number is needed to calculate the yearly averaged power yield including night time hours. 
-        s.specs[0, 0, :] = g1_5
-        s.specs[1, 0, :] = d1_5
-        s.Iscs = np.copy(s.specs)
-        s.P = np.zeros((2, 46))
-            
-        def integra(d, spec): # Function to Integrate spectra from UV to given wavelength 
-            s.P[d, spec] = integrate.trapz(s.specs[d, spec, :], x=wavel) # Power per unit area ( W / m2 )
-            s.Iscs[d, spec, :] = (q/hc)*np.insert(1e-9*integrate.cumtrapz(s.EQE*s.specs[d, spec, :]*wavel, x=wavel), 0, 0) # Current per unit area ( A / m2 ), wavelength in nm
+        def integra(d, specIndex): # Function to Integrate spectra from UV to given wavelength 
+            s.P[d, specIndex] = integrate.trapz(s.spectra[d, specIndex, :], x=wavel) # Power per unit area ( W / m2 )
+            s.Iscs[d, specIndex, :] = (q/hc)*np.insert(1e-9*integrate.cumtrapz(s.EQE*s.spectra[d, specIndex, :]*wavel, x=wavel), 0, 0) # Current per unit area ( A / m2 ), wavelength in nm
         for d in [0, 1]: # Integrate spectra from UV to given wavelength 
-            for i in range(0, 46):
+            for i in range(0, s.spectra.shape[1]):
                 integra(d, i)
+                
         if s.topJunctions==0:
             s.topJunctions = s.junctions
-        if s.convergence:
-            s.bins = [1, 2, 3, 4, 5, 6, 7, 8, 9]
         if s.concentration>1:
             s.d = 1 # use direct spectra
         else:
             s.d = 0 # use global spectra
             s.coe = 1 # concentrator optical efficiency is irrelevant in this case
             
-    def intSpec(s, energy, spec): 
+    def intSpec(s, energy, specIndex): 
         """ Returns integrated photocurrent from given photon energy to UV """
-        return np.interp(1e9*hc/energy/q, wavel, s.Iscs[s.d, spec, :]) # interpolate integrated spectra. Wavelength in nm
-    def getIjx(s, spec):
+        return np.interp(1e9*hc/energy/q, wavel, s.Iscs[s.d, specIndex, :]) # interpolate integrated spectra. Wavelength in nm
+        
+    def getIjx(s, specIndex):
         """ Get current absorbed in each junction, external photocurrent including junction transmission due to finite thickness """
-        s.Ijx = np.zeros(s.junctions)
+        Ijx = np.zeros(s.junctions) # Array with the external photocurrents integrated from spectrum.
         IfromTop = 0
         upperIntSpec = 0
         for i in range(s.junctions-1, -1, -1): # From top to bottom: get external photocurrent in each junction
-            IntSpec = s.intSpec(s.gaps[i]+Varshni(s.T), spec) # IntSpec = Integrated current from UV to given Energy gap
+            IntSpec = s.intSpec(s.gaps[i]+Varshni(s.T), specIndex) # IntSpec = Integrated current from UV to given Energy gap
             Ijx0 = s.concentration*(IntSpec-upperIntSpec) # Get external I per junction 
             upperIntSpec = IntSpec
             if i != 0:
-                s.Ijx[i] = (1-s.transmission)*Ijx0+IfromTop # Subcell thickness cannot be infinite, 3 micron GaAs has transmission in the 2 to 3 % range (depending on integration range)
+                Ijx[i] = (1-s.transmission)*Ijx0+IfromTop # Subcell thickness cannot be infinite, 3 micron GaAs has transmission in the 2 to 3 % range (depending on integration range)
                 IfromTop = s.transmission*Ijx0
             else:
-                s.Ijx[i] = Ijx0+IfromTop # bottom junction does not transmit (back mirror)
-    def thin(s, topJ, bottomJ): 
-        """ Calculate transmission factors for each subcell in series to maximize current under spectrum given in .thinSpec """
+                Ijx[i] = Ijx0+IfromTop # bottom junction does not transmit (back mirror)
+        return Ijx
+                
+    def thin(s): 
+        """ Calculate transmission factors for each subcell to maximize current under spectrum given in .thinSpec """
         # Top cell thinning: 
         # - From top to bottom junction
         #       - If next current is lower:
         #             - Find average with next junction
         #             - If average I is larger than next junction I, extend average and repeat this step
                 
-        s.getIjx(s.thinSpec) # get external photocurrent  
-        initialIjx = np.copy(s.Ijx)
-        
-        Ijxmin = 0
-        while int(Ijxmin*100) != int(s.Ijx.min()*100): # While min I keeps going up
-            Ijxmin = s.Ijx.min()
-            i = topJ
-            while i > bottomJ-1: # Spread I from top to bottom
-                if s.Ijx[i] > s.Ijx[i-1]: # If next current is lower 
-                    imean = i
-                    mean = s.Ijx[i]
-                    previousMean = 0
-                    while mean > previousMean:
-                        imean -= 1
-                        previousMean = mean
-                        if imean > -1:
-                            mean = np.mean(s.Ijx[imean:i+1])
-                    s.Ijx[imean:i+1] = mean
-                    i = imean
-                i -= 1
-        s.thinTrans = s.Ijx/initialIjx
+        Ijx = s.getIjx( s.thinSpec ) # get external photocurrent  
+        initialIjx = np.copy(Ijx)
+        bottomJts = s.junctions-s.topJunctions
+        stack = [ [s.junctions-1, bottomJts] ]
+        if bottomJts > 0:
+            stack.append([bottomJts-1, 0])
+            
+        for series in stack:
+            topJ, bottomJ = series
+            Ijxmin = 0
+            while int( Ijxmin * 100 ) < int( Ijx[ bottomJ : topJ + 1 ].min() * 100 ): # While min I keeps going up
+                Ijxmin = Ijx[ bottomJ : topJ + 1 ].min()
+                subCell = topJ
+                while subCell >= bottomJ: # Spread I from top to bottom
+                    subCell2 = subCell - 1    
+                    if Ijx[ subCell ] > Ijx[ subCell2 ]: # If next current is lower, average current with lower junction to reduce excess
+                        mean = Ijx[ subCell ]
+                        previousMean = mean + 1
+                        while mean < previousMean: # try to decrease excess current in mean by including lower subcells
+                            previousMean = mean
+                            if subCell2 >= bottomJ:
+                                mean = np.mean( Ijx[ subCell2 : subCell + 1 ] )
+                                subCell2 -= 1 # include lower subcell in mean
+                                
+                        Ijx[ subCell2 : subCell + 1] = mean # Change currents
+                        subCell = subCell2 # jump over subcells that have been averaged
+                    subCell -= 1
+                    
+            if bottomJts > 0: # if there is a lower series in stack
+                exIb = Ijx[bottomJts] - Ijx[bottomJts:].min() # The excess current from the bottom junction of the top series, goes to lower series
+                Ijx[bottomJts] -= exIb
+                Ijx[bottomJts-1] += exIb    
+                   
+        s.thinTrans = Ijx / initialIjx
 
         #print ('in', initialIjx, initialIjx.sum())
-        #print ('out', s.Ijx, s.Ijx.sum())
+        #print ('out', Ijx, Ijx.sum())
         #print (s.thinTrans)
-        
-    def serie(s, topJ, bottomJ): 
+
+    def timePerSpectra(s, numBins, binIndex):
+        """ Returns fraction of yearly daytime represented by each spectra """
+        if '.clusters.npy' in s.specsFile and numBins < 21:
+            return s.timePerCluster[ s.d, getSpectrumIndex(numBins, binIndex) ] # Fraction of yearly daytime represented by each spectra
+        else:
+            return 1 / s.numSpectra[numBins] # Fraction of yearly daytime represented by each spectra. numSpectra = [1, 1, 2, 3, ...
+
+    def series(s, topJ, bottomJ, numBins, binIndex): 
         """ Get power from series connected subcells with indexes topJ to bottomJ. topJ = bottomJ is single junction. """
         # 1 - Get external photocurrent in each junction
         # 2 - Get current at the maximum power point from min external photocurrent
@@ -262,13 +310,18 @@ class effs(object):
 
         if (topJ<0):
             return
+        s.T = s.Tmin + s.deltaT[ s.d ] * s.P[ s.d, getSpectrumIndex( numBins, binIndex ) ] / 1000 # To a first approximation, cell T is a linear function of irradiance.
+        # For a 1mm2 cell at 1000 suns bonded to copper substrate T = 70. Cite I. Garcia, in CPV Handbook, ed. by: I. Rey-Stolle, C. Algora
         kT = con.k*s.T
+        k0 = 2 * np.pi * q * kT**3 / ( con.h * hc**2 )
         Irc0 = s.Irc #radiative coupling from upper stack 
 
-        Ijx = s.Ijx*s.thinTrans # thinTrans is set by thin()
-        Imax = Ijx[bottomJ:topJ+1].min() # Initial guess for current at the maximum power point 
+        Ijx = s.getIjx( getSpectrumIndex( numBins, binIndex ) ) * s.thinTrans # thinTrans is set by thin()
+        if Ijx.min() <=0:
+            pdb.set_trace()
+        Imax = Ijx[ bottomJ : topJ + 1 ].min() # Initial guess for current at the maximum power point 
         Imaxs = [0, Imax]
-        while (((Imax-Imaxs[-2])/Imax)**2)>1e-7: # Loop to s consistently refine max power point
+        while ( ( ( Imax-Imaxs[-2] ) / Imax )**2 ) > 1e-7: # Loop to self consistently refine max power point
             V = 0
             s.Irc = Irc0 # Radiative coupling from upper stack 
             Ij = np.copy(Ijx) # Current absorbed in each junction
@@ -285,30 +338,49 @@ class effs(object):
                     backLoss = s.mirrorLoss # This is the electroluminescence photon flux lost at the back of the bottom junction normalized to ERE
                 else:
                     backLoss = s.beta # This is the electroluminescence photon flux lost to the next lower junction
-                I0 = (1+backLoss) * 2*np.pi*q * np.exp(-1*s.gaps[i]*q/kT) * kT**3*((s.gaps[i]*q/kT+1)**2+1) / (con.h*hc**2) / s.ERE # Dark current at V = 0 in A / m2 s
+                g0 = s.gaps[i] * q / kT
+                #I0 = ( 1 + backLoss ) * 2 * np.pi * q * np.exp( -1 * s.gaps[i] * q / kT) * kT**3 * ( ( s.gaps[i] * q / kT + 1 )**2 + 1 ) / ( con.h * hc**2 ) / s.ERE
+                I0 = ( 1 + backLoss ) * k0 * np.exp( -1 * g0 ) * ( ( g0 + 1 )**2 + 1 ) / s.ERE # Dark current at V = 0 in A / m2 s
                 V += (kT/q)*np.log((Ij[i]-I)/I0+1) # add voltage of series connected cells
             V -= s.R*I # V drop due to series resistance
             Imax = I[np.argmax(I*V)] # I at max power point
             Imaxs.append(Imax)
         if len(Imaxs)>10:
-            print ('s consistency is slowing convergence while finding the maximum power point.')
+            print ('self consistency is slowing convergence while finding the maximum power point.')
             print ('ERE or beta might be too high.')
             print ('Current at the maximum power point is converging as:', Imaxs)
             pdb.set_trace()
-        s.Itotal += Ijmin
-        s.Pout += (I*V).max()
+        s.Itotal += Ijmin * s.timePerSpectra( numBins, binIndex ) # Yearly daytime average
+        s.Pout += (I*V).max() * s.timePerSpectra( numBins, binIndex ) # Yearly daytime average
         
-    def stack(s, spec): 
-        """ Use a single spectrum to get power from 4 terminal tandem. If topJunctions = junctions the result is for 2 terminal tandem. """
+    def stack(s, numBins, binIndex): # A stack is composed of one monolythic two terminal series or two of them mechanically stacked
+        """ Use a single spectrum to get power from 2, 3, or 4 terminal tandem. If topJunctions = junctions the result is for 2 terminal tandem. """
         s.Irc = 0 # For top cell there is no radiative coupling from upper cell
-        s.T = s.Tmin+s.deltaT[s.d]*s.P[s.d, spec]/1000 # To a first approximation, cell T is a linear function of irradiance.
-        # T = 70 for a 1mm2 cell at 1000 suns bonded to copper substrate. Cite I. Garcia, in CPV Handbook, ed. by: I. Rey-Stolle, C. Algora
-        s.getIjx(spec) # Get external photocurrents
-        s.serie(s.junctions-1, s.junctions-s.topJunctions) # Add efficiency from top stack, topJunctions is number of juntions in top stack
+        s.series( s.junctions-1, s.junctions-s.topJunctions, numBins, binIndex ) # For top stack, calculate power out for each spectra and add to Pout. topJunctions is number of juntions in top stack
         if not s.opticallyCoupledStacks:
             s.Irc = 0
-        s.serie(s.junctions-s.topJunctions-1, 0) # Add efficiency from bottom stack
+        s.series( s.junctions-s.topJunctions-1, 0, numBins, binIndex ) # For bottom stack, calculate power out for each spectra and add to Pout.
         return
+            
+    def useBins(s, gi, discard): 
+        """Use spectral bins and s.gaps to calculate yearly energy yield and eff. gi speficies where to store results. Optionally discard bad results."""           
+        for numBins in s.bins: # loop for number of bins
+            Pin = 0
+            s.Itotal = 0
+            s.Pout = 0
+            for binIndex in range(s.numSpectra[numBins]-1, -1, -1): # loop for bin index.    numSpectra = [1, 1, 2, 3, ...
+                s.stack( numBins, binIndex ) # Calculate power in/out for each spectra and add to Pin and Pout
+                Pin += s.P[ s.d, getSpectrumIndex( numBins, binIndex ) ] * s.timePerSpectra( numBins, binIndex ) # Yearly averaged daytime power in from the sun
+            eff = s.Pout / Pin / s.concentration
+            if discard and numBins == s.bins[-1]:
+                if eff < ( s.effs[:, numBins].max() - s.effMin ):  
+                    return gi
+            s.effs[gi, numBins] = eff
+            s.Is[gi, numBins] = s.Itotal
+        s.auxEffs[gi, :] = np.zeros(s.junctions)+s.effs[gi, numBins]
+        s.auxIs[gi, :] = np.zeros(s.junctions)+s.Itotal 
+        return gi + 1
+
     def findGaps(s): 
         """ Calculate efficiencies for random band gap combinations. """
         startTime = time.time()
@@ -321,13 +393,13 @@ class effs(object):
         maxDif_ = np.array(maxDif[s.junctions-2])
         # REMOVE SEED unless you want to reuse the same sequence of random numbers (e.g.: compare results after changing one parameter)
         #np.random.seed(07022015)
-        s.rgaps = np.zeros((s.cells+1000, s.junctions)) # Gaps
-        s.auxIs = np.zeros((s.cells+1000, s.junctions)) # Aux array for plotting only
-        s.auxEffs = np.zeros((s.cells+1000, s.junctions)) # Aux array for plotting only  
-        s.Is = np.zeros((s.cells+1000, 10)) # Currents as a function of the number of spectral bins, 0 is standard spectrum 
-        s.effs = np.zeros((s.cells+1000, 10)) # Efficiencies as a function of the number of spectral bins, 0 is standard spectrum 
+        s.rgaps = np.zeros((s.cells, s.junctions)) # Gaps
+        s.auxIs = np.zeros((s.cells, s.junctions)) # Aux array for plotting only
+        s.auxEffs = np.zeros((s.cells, s.junctions)) # Aux array for plotting only  
+        s.Is = np.zeros((s.cells, 22)) # Currents as a function of the number of spectral bins, 0 is standard spectrum, 10 is full spectral dataset
+        s.effs = np.zeros((s.cells, 22)) # Efficiencies as a function of the number of spectral bins, 0 is standard spectrum, 10 is full spectral dataset
         fixedGaps = np.copy(s.gaps) # Copy input gaps to remember which ones are fixed, if gap==0 make it random
-        while (nres<s.cells+1000): # Loop to randomly sample a large number of gap combinations
+        while (nres<s.cells): # Loop to randomly sample a large number of gap combinations
             s.gaps = np.zeros(s.junctions)  
             lastgap = 0
             i = 0
@@ -355,22 +427,14 @@ class effs(object):
                     i += 1
             
             if s.thinning:
-                bottomJts = s.junctions-s.topJunctions # index number for the bottom junction of the top stack
-                s.thin(s.junctions-1, bottomJts) # Find optimal subcell thinning for top stack for a certain spectrum
-                if bottomJts>0: # if there is a lower stack
-                    exIb = s.Ijx[bottomJts]-s.Ijx[bottomJts:].min() # The excess current from the bottom junction of the top stack, goes to lower stack
-                    s.Ijx[bottomJts] -= exIb
-                    s.Ijx[bottomJts-1] += exIb
-                    s.thin(bottomJts-1, 0) # Find optimal subcell thinning for bottom stack. 
+                s.thin()
                 
             s.Itotal = 0
             s.Pout = 0
-            s.stack(1) # calculate power out with average spectrum (1 bin).
+            s.stack( 1, 0 ) # calculate power out with average spectrum (1 bin).
             eff = s.Pout/s.P[s.d, 1]/s.concentration # get efficiency
             
             if (eff>effmax-s.effMin-0.01): # If gap combination is good, do more work on it
-                if nres % 10 == 0: # Show calculation progress from time to time
-                    print ('Tried '+str(ncells)+', got '+str(nres)+' candidate gap combinations.', end="\r")
                 for gi, gap in enumerate(s.gaps): # Expand edges of search space if any of the found gaps are near an edge
                     if gap < Emin_[gi] + 0.01: # Expand energy range allowed for each gap as needed
                         if Emin_[gi] > 0.5: # Only energies between 0.5 and 2.5 eV are included
@@ -388,19 +452,9 @@ class effs(object):
                 s.rgaps[nres, :] = s.gaps
                 s.effs[nres, 1] = eff 
                 s.Is[nres, 1] = s.Itotal 
-                for i in s.bins: # loop for number of bins
-                    s.Itotal = 0
-                    Pin = 0
-                    s.Pout = 0                  
-                    for j in range(0, a1123456789[i]): # loop for bin index.    a1123456789 = [1, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-                        s.stack(bindex[i][j]) # calculate power out for each spectra and add to Pout to calculate average efficiency
-                        Pin += s.P[s.d, bindex[i][j]]
-                    s.effs[nres, i] = s.Pout/Pin/s.concentration
-                    s.auxEffs[nres, :] = np.zeros(s.junctions)+s.effs[nres, i]
-                    s.auxIs[nres, :] = np.zeros(s.junctions)+s.Itotal/a1123456789[i] # a1123456789 = [1, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-                    s.Is[nres, i] = s.Itotal/a1123456789[i]
-                nres += 1
-                                
+                nres = s.useBins(nres, True) # Calculate efficiency for s.gaps, store result if gaps are good
+                if nres % 10 == 0: # Show calculation progress from time to time
+                    print ('Tried '+str(ncells)+', got '+str(nres)+' candidate gap combinations.', end="\r")                                
             ncells += 1
         
         mask = s.auxEffs > s.auxEffs.max()-s.effMin
@@ -415,8 +469,8 @@ class effs(object):
         s.rgaps = np.reshape(s.rgaps, (-1, s.junctions)) # Restore proper array shapes after masking 
         s.auxIs = np.reshape(s.auxIs, (-1, s.junctions))
         s.auxEffs = np.reshape(s.auxEffs, (-1, s.junctions))
-        s.effs = np.reshape(s.effs, (-1, 10))
-        s.Is = np.reshape(s.Is, (-1, 10))
+        s.effs = np.reshape(s.effs, (-1, 22))
+        s.Is = np.reshape(s.Is, (-1, 22))
         
         tiempo = int(time.time()-startTime)
         res = np.size(s.rgaps)/s.junctions
@@ -441,17 +495,20 @@ class effs(object):
         res = np.size(s.rgaps)/s.junctions
         Is_ = np.copy(s.auxIs)
         Is_ = (Is_-Is_.min())/(Is_.max()-Is_.min())
-        srIs_ = (s.Is[:, s.bins[-1]]-s.Is[:, s.bins[-1]].min())/(s.Is[:, s.bins[-1]].max()-s.Is[:, s.bins[-1]].min())
         if s.convergence:
             plt.figure()
-            plt.xlabel('Number of spectral bins')
-            plt.ylabel('Efficiency change (%)') # Absolute efficiency change by increasing number of bins (%)
+            plt.xlabel('Number of spectra')
+            plt.ylabel('Yearly efficiency error (%)')
+            plt.xticks(list(range(1,21)))
+            plt.xlim(1,20)
+            plt.ylim( 0, 1.01*( 100 * ( s.effs[ : , 1 ] - s.effs[ : , -1 ] ) ).max() )  
+            plt.tick_params(axis='y', right='on')
             for i in range(0, int(res)):
-                diffs = []
-                for j in s.bins[:-1]:
-                    diffs.append(100*(s.effs[i, j+1]-s.effs[i, j]))
-                plt.plot(s.bins[:-1], diffs, color = LGBT(srIs_[i]), linewidth=0.1) #  color = LGBT(auxIs[i*s.junctions])
-            plt.savefig(s.name+' '+s.specsFile.replace('.npy', '')+' convergence '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+str(int(s.timeStamp)), dpi=600)
+           #     diffs = []
+             #   for j in s.bins[:-1]:
+               #     diffs.append(100*(s.effs[i, j+1]-s.effs[i, j]))
+                plt.plot( range(1,21), 100*( s.effs[ i , 1:-1 ] - s.effs[ i , -1 ] ), color = LGBT(Is_[i,0]), linewidth=0.5) #  color = LGBT(auxIs[i*s.junctions])
+            plt.savefig(s.name+' '+s.specsFile.replace('.npy', '').replace('.','-')+' convergence '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+str(int(s.timeStamp)), dpi=600)
             plt.show()
         plt.figure()
         ymin = (s.effs[:, s.bins[-1]].max()-s.effMin)
@@ -480,13 +537,13 @@ class effs(object):
         axb = plt.gca().twinx()
         axb.set_ylim(s.kWh(ymin),s.kWh(ymax))
         axb.set_ylabel('Yield $\mathregular{(kWh / m^2 / year)}$')
-        plt.savefig(s.name+' '+s.specsFile.replace('.npy', '')+' '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+str(int(s.timeStamp)), dpi=600)
+        plt.savefig(s.name+' '+s.specsFile.replace('.npy', '').replace('.','-')+' '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+str(int(s.timeStamp)), dpi=600)
         plt.show()        
         plt.xlim(100*(s.auxEffs.max()-s.effMin), 100*s.auxEffs.max())
         plt.xlabel('Yearly averaged efficiency (%)')
         plt.ylabel('Count')
         plt.hist(100*s.effs[:, s.bins[-1]], bins=30)
-        plt.savefig(s.name+' Hist '+s.specsFile.replace('.npy', '')+' '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+str(int(s.timeStamp)), dpi=600)      
+        plt.savefig(s.name+' Hist '+s.specsFile.replace('.npy', '').replace('.','-')+' '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+str(int(s.timeStamp)), dpi=600)      
         plt.show()
         
     def save(s):
@@ -498,17 +555,7 @@ class effs(object):
         """ Recalculate efficiencies with new set of input parameters using previously found gaps. Call __init__() to change parameters before recalculate() """
         for gi in range(0, s.rgaps.shape[0]):
             s.gaps = s.rgaps[gi]
-            for i in s.bins: # loop for number of bins
-                s.Itotal = 0
-                Pin = 0
-                s.Pout = 0                  
-                for j in range(0, a1123456789[i]): # loop for bin index.    a1123456789 = [1, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-                    s.stack(bindex[i][j]) # calculate power out for each spectra and add to Pout to calculate average efficiency
-                    Pin += s.P[s.d, bindex[i][j]]
-                s.effs[gi, i] = s.Pout/Pin/s.concentration
-                s.auxEffs[gi, :] = np.zeros(s.junctions)+s.effs[gi, i]
-                s.auxIs[gi, :] = np.zeros(s.junctions)+s.Itotal/a1123456789[i] # a1123456789 = [1, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-                s.Is[gi, i] = s.Itotal/a1123456789[i]
+            s.useBins(gi, False) # Calculate efficiency for s.gaps
         s.results()
         
     def compare(s, s0): 
@@ -574,15 +621,17 @@ def show_assumptions(): # Shows the used EQE model and the AOD and PW statistica
 
 def generate_spectral_bins(latMin=40, latMax=40, longitude='random', 
         AOD='random', PW='random', tracking='38 -999 -999', 
-        speCount = 20000, NSRDBfile='', fname='Iscs'):
+        speCount = 10000, NSRDBfile='', fname='spectra', saveFullSpectra = False, loadFullSpectra = False,
+        method='clusters', numFeatures = 200    ): # if method is set to anything else, Garcia's binning method will be used. DOI: 10.1002/pip.2943  
+    
     def EPR(i, s1): 
         """ Calculates EPR, integrates Power and stores spectra"""
         P[:,i] = integrate.trapz(s1, x=wavel, axis=1)
         if (P[0, i] > 0) and (P[1, i] > 0):
-            specs[:, i, :] = s1
+            fullSpectra[:, i, :] = s1
             EPR650[:, i] = integrate.trapz( s1[:, :490], x=wavel[:490], axis=1 )
             EPR650[:, i] = ( P[:, i] - EPR650[:, i] ) / EPR650[:, i] # Calculate EPR, Ivan Garcia's criteria for binning
-            i += 1
+            i += 1 # Spectrum index is incremented if spectrum is not zero
         return i
             
     # NECESARY CHANGES IN SMARTS 2.9.5 SOURCE CODE
@@ -597,7 +646,7 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
     # tracking='38 -999 -999' for 2 axis tracking. tracking='38 37 -999' for 1 axis tracking. '38 37 180' for fixed panel. 
     # 37 is near optimal tilt only for a certain range of lattitudes. 180 is for northern hemisphere.
 
-    specs = np.zeros((2, speCount, len(wavel))) # Array to hold generated spectra
+    fullSpectra = np.zeros((2, speCount, len(wavel))) # Array to hold generated spectra, first index is 0=global or 1=direct
     EPR650 = np.zeros((2, speCount)) # Ivan Garcia's criteria for binning, store EPR value for each spectrum
     P = np.zeros((2, speCount)) # Power for each spectrum
 
@@ -606,7 +655,7 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
         Ng = np.loadtxt(NSRDBfile, skiprows=3, delimiter=',', usecols=tuple(range(159, 310))) # Global Horizontal
         Nd = np.loadtxt(NSRDBfile, skiprows=3, delimiter=',', usecols=tuple(range(8, 159))) # Direct spectra
         attempts = Nd.shape[0]
-        if fname == 'Iscs':
+        if fname == 'spectra':
             fname = NSRDBfile.replace('.csv', '')
         s1 = np.zeros((2, len(wavel)))
         speCount = 0
@@ -615,10 +664,19 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
             s1[1,:] = np.interp(wavel, np.arange(300, 1810, 10), Nd[i, :], left=0, right=0) # Direct spectra
             speCount = EPR(speCount, s1) # Calculates EPR, integrates Power and stores spectra
             print (speCount, 'spectra out of', attempts, 'points in time', end="\r")
-        specs = specs[:,:speCount] # Array to hold generated spectra
-        EPR650 = EPR650[:,:speCount] # Ivan Garcia's criteria for binning, store EPR value for each spectrum
+        fullSpectra = fullSpectra[ :, :speCount, : ] # Array to hold the whole set of spectra
+        EPR650 = EPR650[ :, :speCount ] # Ivan Garcia's criteria for binning, store EPR value for each spectrum
         P = P[:,:speCount] # Power for each spectrum        
-    else:
+
+    elif loadFullSpectra: # To reuse a full set of spectra saved earlier 
+        fullSpectra = np.load(fname+'.full.npy')
+        attempts = fullSpectra[-1,-1,-1]
+        fullSpectra[-1,-1,-1] = 0
+        
+        for specIndex in range(0, speCount):
+            EPR(specIndex, fullSpectra[:,specIndex,:]) # Calculates EPR, integrates Power and stores spectra
+
+    else:# Generate SMARTS spectra if no file with spectra is provided
         longitude2 = longitude
         AOD2 = AOD
         PW2 = PW
@@ -628,7 +686,7 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
         t0 = ''.join(t0)
         attempts = 0
         t0 = t0.replace('38 -999 -999', tracking)
-        for i in range(0, speCount):
+        for specIndex in range(0, speCount):
             tama = 0
             while tama == 0: # Generate random time, location, AOD, PW
                 
@@ -655,53 +713,97 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
                 except OSError:
                     pass                
                 attempts += 1
-                ou = sub.check_call('./smartsAM4', shell=True) # execute SMARTS
+                sub.check_call('./smartsAM4', shell=True) # execute SMARTS
                 tama = os.stat('smarts295.ext.txt').st_size # check output file
                 if tama>0:
                     try: # load output file if it exists
                         s1 = np.loadtxt("smarts295.ext.txt", delimiter=' ', usecols=(0, 1, 2), unpack=True, skiprows=1)#Global Tilted = 1, Direct Normal= 2, Diffuse Horizontal=3
                     except:
                         tama = 0
-            EPR(i, s1[1:,:]) # Calculates EPR, integrates Power and stores spectra
-        print ('Finished. Called smarts '+str(attempts)+' times and got '+str(speCount)+' spectra')
-
+            EPR(specIndex, s1[1:,:]) # Calculates EPR, integrates Power and stores spectra
+        print ('Finished generating spectra. Called Smarts '+str(attempts)+' times and got '+str(speCount)+' spectra')
+    
+    if saveFullSpectra:
+        fullSpectra[-1,-1,-1] = attempts
+        np.save(fname+'.full', fullSpectra)
+    
     totalPower = np.zeros(2)
-    bincount = np.zeros((2,9), dtype=np.int)
     binlimits = []
     binspecs = []
-    Iscs = np.zeros((2, 46, len(wavel))) # Prepare data structure for saving to file
-    for m in (0,1):
-        specs[m, :] = specs[m, np.argsort(EPR650[m,:]), :] # Sort spectra and integrated powers by EPR
-        P[m, :] = P[m, np.argsort(EPR650[m,:])]
-        totalPower[m] = P[m, :].sum() # Sum power
-        binlimits.append([])
-        binspecs.append([])
-        for i in range(0, 9): # Prepare data structure to store bin limits and averaged spectra
-            binlimits[m].append(np.zeros(i+2, dtype=np.int))
-            binspecs[m].append(np.zeros((i+1, len(wavel))))
-        bincount[m] = np.zeros(9, dtype=np.int)
-        accubin = 0 # Calculate bin limits with equal power in each bin
-        for i in range(0, speCount):
-            accubin += P[m, i] # Accumulate power and check if its a fraction of total power
-            for j in range(0, 9):
-                if accubin >= totalPower[m]/(j+1)*(bincount[m, j]+1): # check if its a fraction of total power
-                    bincount[m, j] += 1
-                    binlimits[m][j][bincount[m,j]] = i+1 # Store bin limit     
-        for i in range(0, 9): #iterate over every bin set
-            binlimits[m][i][-1] = speCount # set the last bin limit to the total number of spectra
-        # Average spectra using the previously calculated bin limits
-        for i in range(0, 9): #bin set
-            for j in np.arange(0, i+1, 1): #bin counter
-                binspecs[m][i][j,:] = np.sum(specs[m, binlimits[m][i][j]:binlimits[m][i][j+1]], axis=0) / (binlimits[m][i][j+1]-binlimits[m][i][j]) # Average spectra in each bin
-        k = 1
-        for i in range(0, 9): #bin set
-            for j in range(0, i+1): #bin counter
-                Iscs[m, k, :] = binspecs[m][i][j,:]
-                k += 1
+    spectra = np.zeros( (2, 211, len(wavel)) ) # Prepare data structure for saving to file
+    timePerCluster = np.zeros( (2, 211) ) # Each spectrum is representative of this fraction of yearly daytime
     
-    Iscs[0, 0, -1] = speCount/attempts # This number is needed to calculate the yearly averaged power yield including night time hours. 
+    if method == 'clusters': # Use machine learning clustering methods            
+        # Step 1: Search for features in the spectra that show the same trends as a function of time       
+        conn = np.zeros( ( len(wavel), len(wavel) ), dtype=int) # Connectivity matrix for spectral feature identification
+        for i in range(1, len(wavel)-1): # Only allow adjacent points to be in the same spectral feature
+            conn[i, i] = 1
+            conn[i, i+1] = 1
+            conn[i, i-1] = 1
+        conn[0,0] = 1
+        conn[0,1] = 1
+        conn[len(wavel)-1,len(wavel)-1] = 1
+        conn[len(wavel)-1,len(wavel)-2] = 1
+        
+        specFeat = np.zeros((2, speCount, numFeatures)) 
+             
+        for d in (0,1): # d = 1 for direct spectra
+            # Begin by searching for characteristic spectral features
+            features = FeatureAgglomeration(n_clusters=numFeatures, connectivity=conn).fit(fullSpectra[d,:,:])   
+                    
+            for fea in range(numFeatures):
+                mask = features.labels_ == fea
+                specFeat[d, :, fea] = fullSpectra[d, :, mask].mean(axis=0)
+                
+            # Now merge those spectra that have  nearly the same intensity for their characteristic features      
+            specIndex = 1
+            for numBins in range(1, 21): # number of bins
+
+                #clusters = AgglomerativeClustering(n_clusters=numBins, linkage='ward').fit(specFeat[d,:,:]) # Find clusters of spectra
+                clusters = KMeans(n_clusters=numBins).fit(specFeat[d,:,:]) # Find clusters of spectra
+                
+                for binIndex in range(0, numBins): 
+                    mask = clusters.labels_ == binIndex
+                    spectra[d, specIndex, :] = fullSpectra[d,mask,:].mean(axis=0)
+                    timePerCluster[d, specIndex] = mask.sum()/speCount
+                    specIndex += 1
+        
+        np.save(fname+'.timePerCluster', timePerCluster)
+        fname += '.clusters'
+        
+    else: # If not using machine learning clusters, use Garcia's binning method based on the EPR650 criteria, DOI: 10.1002/pip.2943        
+        for d in (0,1): # d = 1 for direct spectra
+            fullSpectra[d, :, :] = fullSpectra[ d, np.argsort(EPR650[d,:]), : ] # Sort spectra and integrated powers by EPR
+            P[d, :] = P[d, np.argsort(EPR650[d,:])]
+            totalPower[d] = P[d, :].sum() # Sum power
+            binlimits.append([])
+            binspecs.append([])
+            binIndex = np.zeros(21, dtype=np.int)
+            for numBins in range(1, 21): # Prepare data structure to store bin limits and averaged spectra. numBins is total number of bins.
+                binlimits[d].append( np.zeros( numBins+1, dtype=np.int ) )
+                binspecs[d].append( np.zeros( ( numBins, len(wavel) ) ) )
+            accubin = 0 
+            for specIndex in range(0, speCount): # Calculate bin limits with equal power in each bin
+                accubin += P[d, specIndex] # Accumulate power and check if its a fraction of total power
+                for numBins in range(1, 21):
+                    if accubin >= ( binIndex[ numBins ] + 1 ) * totalPower[d] / numBins: # check if power accumulated is a fraction of total power
+                        binIndex[ numBins ] += 1 # Create new bin if it is
+                        binlimits[d][ numBins - 1 ][ binIndex[ numBins ] ] = specIndex+1 # Store bin limit     
+            for numBins in range(1, 21): #iterate over every bin set
+                binlimits[d][numBins-1][-1] = speCount # set the last bin limit to the total number of spectra
+            # Average spectra using the previously calculated bin limits
+            for numBins in range(1, 21):
+                for binIndex in range(0, numBins): 
+                    binspecs[d][numBins-1][binIndex,:] = np.mean( fullSpectra[d, binlimits[d][numBins-1][binIndex]:binlimits[d][numBins-1][binIndex+1]], axis=0 ) # mean each bin
+            specIndex = 1
+            for numBins in range(1, 21): # number of bins
+                for binIndex in range(0, numBins): #bin counter
+                    spectra[d, specIndex, :] = binspecs[d][numBins-1][binIndex,:]
+                    specIndex += 1
+        fname += '.bins'
     
-    np.save(fname, Iscs)
+    spectra[0, 0, -1] = speCount/attempts # This number is needed to calculate the yearly averaged power yield including night time hours. 
+    np.save(fname, spectra)    
     
 def docs(): # Shows HELP file
     with open('HELP', 'r') as fin:
