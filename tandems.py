@@ -20,11 +20,12 @@ from datetime import datetime
 from scipy import integrate
 from sklearn.cluster import FeatureAgglomeration
 from sklearn.cluster import KMeans
+from glob import glob
 import scipy.constants as con
 hc = con.h*con.c
 q = con.e
 
-version = 27
+version = 37
 print ('Tandems version',version)
 
 np.set_printoptions(precision=3) # Print 3 decimal places only
@@ -88,12 +89,40 @@ minDif.append([0.28, 0.28, 0.32, 0.32, 0.42]) # 6 junctions
 def Varshni(T): #Gives gap correction in eV relative to 300K using GaAs parameters. T in K
     return (T**2)/(T+572)*-8.871e-4+0.091558486 # Beware, using GaAs parameters slightly overestimates the effect for most other semiconductors
 
-def load(fname): 
-    """ Load previously saved effs object. tandems.load('/path/and file name here') """
-    with open(fname, "r") as f:
-        t0 = f.readlines()
-        t0 = ''.join(t0)
-        return json_tricks.loads(t0)
+def load(fnames): 
+    """ Load previously saved effs objects. tandems.load('/path/and_file_name_pattern*here')
+    A file name pattern with wildcards (*) can be used to load a number of files and join them in a single object. 
+    This is useful for paralelization.
+    All files need to share the same set of input parameters because this function
+    does not check if it makes sense to join the output files."""
+    s = False
+    arrayOfFiles = glob(fnames)
+    if arrayOfFiles:
+        for fname in arrayOfFiles:
+            with open(fname, "rb") as f:         
+                if not s:
+                    s = json_tricks.loads(f.read())
+                else:
+                    s2 = json_tricks.loads(f.read())
+                    s.rgaps = np.append(s.rgaps,s2.rgaps, axis=0)
+                    s.auxIs = np.append(s.auxIs,s2.auxIs, axis=0)
+                    s.auxEffs = np.append(s.auxEffs,s2.auxEffs, axis=0)
+                    s.Is = np.append(s.Is,s2.Is, axis=0)
+                    s.effs = np.append(s.effs,s2.effs, axis=0)
+        s.cells = s.gaps.shape[0]
+    else:
+        print('Files not found')
+    return s
+
+def multiFind( cores = 2, saveAs = 'someParallelData', parameterStr = 'cells=1000, junctions=4'):
+    """Hack to use as many CPU cores as desired in the search for optimal band gaps.
+    Uses the tandems.effs object and its findGaps method.
+    Total number of results will be cores * cells.
+    Calls bash (so do not expect this to work under Windows) to create many instances of this python module running in parallel."""
+    os.system('for i in `seq 1 '+str(cores)+'`; do python -c "import tandems;s=tandems.effs(name='+chr(39)+saveAs+chr(39)+','+parameterStr+');s.findGaps();s.save()" & done; wait')
+    s = load(saveAs+'*') # Loads all results and joins them in a single object
+    s.results()
+    s.plot()
 
 class effs(object):
     """ Object class to hold results sets of yearly average photovoltaic efficiency 
@@ -108,7 +137,7 @@ class effs(object):
     eff.findGaps()
     eff.plot() # Figures saved to PNG files.
     
-    eff.save() # Data saved for later reuse/replotting. Path and file name set in eff.name, some parameters and timestamp are appended to filename
+    eff.save() # Data saved for later reuse/replotting. Path and file name set in eff.name, some parameters and autoSuffix are appended to filename
 
     eff2 = tandems.copy.deepcopy(eff)
     eff2.__init__(bins=8, concentration=1, R=4e-5)  # Change some input parameters but keep previously found set of optimal gap combinations.
@@ -130,7 +159,7 @@ class effs(object):
     gaps = [0, 0, 0, 0, 0, 0] # If a gap is 0, it is randomly chosen by tandems.findGaps(), otherwise it is kept fixed at value given here.
     ERE = 0.01 #external radiative efficiency without mirror. With mirror ERE increases by a factor (1 + beta)
     beta = 11 #n^2 squared refractive index  =  radiative coupling parameter  =  substrate loss.
-    bins = 8 # bins is number of spectra used to evaluate eff. See convergence = True. 
+    bins = 15 # bins is number of spectra used to evaluate eff. See convergence = True. 
     Tmin = 15+273.15 # Minimum cell temperature at zero irradiance in K
     deltaT = np.array([30, 55]) # Device T increase over Tmin caused by high irradiance (1000 W/m2), first value is for one sun cell, second for high concentration cell
     convergence = False # Set to True to test the effect of changing the number of spectral bins used to calculate the yearly average efficiency
@@ -140,7 +169,7 @@ class effs(object):
     effMin = 0.02 # Lowest sampled efficiency value relative to maximum efficiency. Gaps with lower efficiency are discarded.
     d = 1 # 0 for global spectra, 1 for direct spectra
     # T = 70 for a 1mm2 cell at 1000 suns bonded to copper substrate. Cite I. Garcia, in CPV Handbook, ed. by: I. Rey-Stolle, C. Algora
-    name = './Test' # Can optionally include path to destination of generated files. Example: "/home/documents/test". Some parameters and timestamp are appended to filename
+    name = './Test' # Can optionally include path to destination of generated files. Example: "/home/documents/test". Some parameters and autoSuffix are appended to filename
     cells = 1000 # Target number of calculated tandem cells. Actual number of results will be less.
     R = 5e-7 # Series resistance of each stack in Ohm*m2. Default is optimistic value for high concentration devices
     # R = 4e-5 is suggested as optimistic value for one sun flat plate devices
@@ -150,28 +179,28 @@ class effs(object):
     coe = 0.9 # Concentrator optical efficiency. Optimistic default value. Used only for yield calculation.
     cloudCover = 0.26 # Fraction of the yearly energy that is lost due to clouds. Location dependent, used only for yield calculation. Default value 0.26 is representative of area near Denver, CO.
     # If using experimental spectra, set cloudCover = 0. If temporal resolution is low, it might be appropriate to set Tmin = Tmin + deltaT to keep T constant.
-    specsFile = 'latitude40.clusters.npy' # Name of the file with the spectral set obtained from tandems.generate_spectral_bins(). See genBins.py
+    specsFile = 'lat40.clusters.npy' # Name of the file with the spectral set obtained from tandems.generate_spectral_bins(). See genBins.py
     # File types for spectral sets should either be .clusters.npy or .bins.npy
     
     # ---- Results ----
     
-    rgaps = 0 # Results Array with high efficiency Gap combinations found by trial and error
-    Is = 0 # Results Array with Currents as a function of the number of spectral bins, 0 is standard spectrum 
-    effs = 0 # Results Array with Efficiencies as a function of the number of spectral bins, 0 is standard spectrum
+    rgaps = np.zeros((1, 6)) # Results Array with high efficiency Gap combinations found by trial and error
+    Is = np.zeros((1, 22)) # Results Array with Currents as a function of the number of spectral bins, 0 is standard spectrum 
+    effs = np.zeros((1, 22)) # Results Array with Efficiencies as a function of the number of spectral bins, 0 is standard spectrum
     
     # ---- Internal variables ----
     
     Irc = 0 # Radiative coupling current
     Itotal = 0 # Isc
     Pout = 0 # Power out
-    T = 0 # Set from irradiance at run time
-    auxEffs = 0 # Aux array for efficiencies. Has the same shape as rgaps for plotting and array masking. 
-    auxIs = 0 # Aux array for plotting. sum of short circuit currents from all terminals.
+    T = 300 # Set from irradiance at run time in Kelvin
+    auxEffs = np.zeros((1, 6)) # Aux array for efficiencies. Has the same shape as rgaps for plotting and array masking. 
+    auxIs = np.zeros((1, 6)) # Aux array for plotting. sum of short circuit currents from all terminals.
     spectra = [] # Spectral set loaded from file
     P = [] # Array with integrated power in each spectrum
     Iscs = [] # Array with current in each spectrum
     thinTrans = 1 # Array with transmission of each subcell
-    timeStamp = 0
+    autoSuffix = ''
     daytimeFraction = 1
     numSpectra = [1]+list(range(1,21))+[10000] # Number of spectra as a function of numBins
     timePerCluster = 0 # Fraction of the yearly daytime hours that is represented by each cluster of spectra. Set in __init__ 
@@ -179,8 +208,15 @@ class effs(object):
     # ---- Methods and functions ----
     
     def __init__(s, **kwargs):
-        """ Call this to change input parameters without discarding previously found gaps before calling recalculate() """ 
-        s.timeStamp = time.time()
+        """ Call __init__ to change input parameters without discarding previously found gaps before calling recalculate() """
+
+        # This is for having an automatic unique suffix in filenames to reduce the chance of accidental overwriting
+        alphabet='0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+        number = int((62**6-1)*np.random.rand())
+        while number != 0:
+            number, i = divmod(number, 62)
+            s.autoSuffix = alphabet[i] + s.autoSuffix
+
         for k, v in kwargs.items():
             setattr(s, k, v)
         if type(s.bins)==int:
@@ -192,8 +228,15 @@ class effs(object):
             s.timePerCluster[1, 0] = 1
         elif '.bins.npy' not in s.specsFile:
             print('File types for spectral sets should either be .clusters.npy or .bins.npy')
-            exit()            
-
+            return            
+        
+        if s.cells == 1:
+            s.rgaps = np.array([s.gaps])
+            s.auxIs = np.zeros((s.cells, s.junctions)) # Aux array for plotting only
+            s.auxEffs = np.zeros((s.cells, s.junctions)) # Aux array for plotting only  
+            s.Is = np.zeros((s.cells, 22)) # Currents as a function of the number of spectral bins, 0 is standard spectrum, 10 is full spectral dataset
+            s.effs = np.zeros((s.cells, 22)) # Efficiencies as a function of the number of spectral bins, 0 is standard spectrum, 10 is full spectral dataset
+        
         s.spectra = np.load(s.specsFile) # Load binned or clustered spectra
         s.daytimeFraction = s.spectra[0, 0, -1] # This is the fraction of daytime hours in a year and is needed to calculate the yearly averaged power yield including night time hours. 
         s.spectra[0, 0, -1] = 0
@@ -230,12 +273,13 @@ class effs(object):
         return np.interp(1e9*hc/energy/q, wavel, s.Iscs[s.d, specIndex, :]) # interpolate integrated spectra. Wavelength in nm
         
     def getIjx(s, specIndex):
-        """ Get current absorbed in each junction, external photocurrent including junction transmission due to finite thickness """
+        """ Get cell T and external I in each junction, including EQE and junction transmission due to finite thickness """
         Ijx = np.zeros(s.junctions) # Array with the external photocurrents integrated from spectrum.
         IfromTop = 0
         upperIntSpec = 0
+        s.T = s.Tmin + s.deltaT[ s.d ] * s.P[ s.d, specIndex ] / 1000 # To a first approximation, cell T is a linear function of irradiance.
         for i in range(s.junctions-1, -1, -1): # From top to bottom: get external photocurrent in each junction
-            IntSpec = s.intSpec(s.gaps[i]+Varshni(s.T), specIndex) # IntSpec = Integrated current from UV to given Energy gap
+            IntSpec = s.intSpec( s.gaps[i] + Varshni( s.T ), specIndex ) # IntSpec = Integrated current from UV to given Energy gap
             Ijx0 = s.concentration*(IntSpec-upperIntSpec) # Get external I per junction 
             upperIntSpec = IntSpec
             if i != 0:
@@ -245,43 +289,51 @@ class effs(object):
                 Ijx[i] = Ijx0+IfromTop # bottom junction does not transmit (back mirror)
         return Ijx
                 
-    def thin(s): 
+    def thin(s): # This function is normally not used. Only of interest in a few special cases with constrained band gaps. NOT FULLY TESTED
         """ Calculate transmission factors for each subcell to maximize current under spectrum given in .thinSpec """
         # Top cell thinning: 
         # - From top to bottom junction
         #       - If next current is lower:
         #             - Find average with next junction
         #             - If average I is larger than next junction I, extend average and repeat this step
+        # Most general case considered is two mechanically stacked devices. Each device has 2 terminals. Stack has 4 terminals.
                 
-        Ijx = s.getIjx( s.thinSpec ) # get external photocurrent  
+        Ijx = s.getIjx( s.thinSpec ) # get external photocurrent
         initialIjx = np.copy(Ijx)
-        bottomJts = s.junctions-s.topJunctions
-        stack = [ [s.junctions-1, bottomJts] ]
-        if bottomJts > 0:
-            stack.append([bottomJts-1, 0])
+        bottomJts = s.junctions-s.topJunctions # Bottom junction of the top stack
+        stack = [ [s.junctions-1, bottomJts] ] # This is the top 2 terminal multijunction in the mechanical stack
+        if bottomJts > 0: # If there are additional junctions
+            stack.append([bottomJts-1, 0]) # Add the bottom 2 terminal multijunction in the mechanical stack
             
-        for series in stack:
-            topJ, bottomJ = series
+        for seriesDevice in stack: # First do top device in the mechanical stack
+            topJ, bottomJ = seriesDevice
             Ijxmin = 0
             while int( Ijxmin * 100 ) < int( Ijx[ bottomJ : topJ + 1 ].min() * 100 ): # While min I keeps going up
                 Ijxmin = Ijx[ bottomJ : topJ + 1 ].min()
-                subCell = topJ
-                while subCell >= bottomJ: # Spread I from top to bottom
-                    subCell2 = subCell - 1    
-                    if Ijx[ subCell ] > Ijx[ subCell2 ]: # If next current is lower, average current with lower junction to reduce excess
-                        mean = Ijx[ subCell ]
-                        previousMean = mean + 1
+                donorSubcell = topJ
+                while donorSubcell > bottomJ: # Spread I from top to bottom
+                    #for aceptorSubcell in range( donorSubcell-1, bottomJ-1, -1 ):
+                    aceptorSubcell = donorSubcell - 1                    
+                    if Ijx[ donorSubcell ] > Ijx[ aceptorSubcell ]: # If next current is lower, average current with lower junction to reduce excess
+                        mean = np.mean( Ijx[ aceptorSubcell : donorSubcell + 1 ] )
+                        previousMean = mean + 1                       
                         while mean < previousMean: # try to decrease excess current in mean by including lower subcells
                             previousMean = mean
-                            if subCell2 >= bottomJ:
-                                mean = np.mean( Ijx[ subCell2 : subCell + 1 ] )
-                                subCell2 -= 1 # include lower subcell in mean
-                                
-                        Ijx[ subCell2 : subCell + 1] = mean # Change currents
-                        subCell = subCell2 # jump over subcells that have been averaged
-                    subCell -= 1
+                            aceptorSubcell -= 1 # include lower subcell in mean
+                            if aceptorSubcell < bottomJ: # sanity check
+                                aceptorSubcell = bottomJ
+                            else:
+                                mean = np.mean( Ijx[ aceptorSubcell : donorSubcell + 1 ] )
+                        
+                        if previousMean < mean: #backtrack if last attempt was failure
+                            mean = previousMean
+                            aceptorSubcell += 1
+                                                        
+                        Ijx[ aceptorSubcell : donorSubcell + 1] = mean # Change currents
+                        donorSubcell = aceptorSubcell # jump over subcells that have been averaged
+                    donorSubcell -= 1 # Go down 
                     
-            if bottomJts > 0: # if there is a lower series in stack
+            if bottomJts > 0: # if there is a lower series device in stack
                 exIb = Ijx[bottomJts] - Ijx[bottomJts:].min() # The excess current from the bottom junction of the top series, goes to lower series
                 Ijx[bottomJts] -= exIb
                 Ijx[bottomJts-1] += exIb    
@@ -299,8 +351,8 @@ class effs(object):
         else:
             return 1 / s.numSpectra[numBins] # Fraction of yearly daytime represented by each spectra. numSpectra = [1, 1, 2, 3, ...
 
-    def series(s, topJ, bottomJ, numBins, binIndex): 
-        """ Get power from series connected subcells with indexes topJ to bottomJ. topJ = bottomJ is single junction. """
+    def series(s, topJ, bottomJ, numBins, binIndex):
+        """ Get power from 2 terminal monolythic multijunction device. Series connected subcells with indexes topJ to bottomJ. topJ = bottomJ is single junction. """
         # 1 - Get external photocurrent in each junction
         # 2 - Get current at the maximum power point from min external photocurrent
         # 3 - Add radiative coupling, recalculate maximum power point, this changes radiative coupling, repeat until self consistency
@@ -310,13 +362,12 @@ class effs(object):
 
         if (topJ<0):
             return
-        s.T = s.Tmin + s.deltaT[ s.d ] * s.P[ s.d, getSpectrumIndex( numBins, binIndex ) ] / 1000 # To a first approximation, cell T is a linear function of irradiance.
+        Ijx = s.getIjx( getSpectrumIndex( numBins, binIndex ) ) * s.thinTrans # thinTrans is set by thin()
         # For a 1mm2 cell at 1000 suns bonded to copper substrate T = 70. Cite I. Garcia, in CPV Handbook, ed. by: I. Rey-Stolle, C. Algora
         kT = con.k*s.T
         k0 = 2 * np.pi * q * kT**3 / ( con.h * hc**2 )
         Irc0 = s.Irc #radiative coupling from upper stack 
 
-        Ijx = s.getIjx( getSpectrumIndex( numBins, binIndex ) ) * s.thinTrans # thinTrans is set by thin()
         if Ijx.min() <=0:
             pdb.set_trace()
         Imax = Ijx[ bottomJ : topJ + 1 ].min() # Initial guess for current at the maximum power point 
@@ -353,8 +404,9 @@ class effs(object):
         s.Itotal += Ijmin * s.timePerSpectra( numBins, binIndex ) # Yearly daytime average
         s.Pout += (I*V).max() * s.timePerSpectra( numBins, binIndex ) # Yearly daytime average
         
-    def stack(s, numBins, binIndex): # A stack is composed of one monolythic two terminal series or two of them mechanically stacked
+    def stack(s, numBins, binIndex): # A stack is composed of one monolythic two terminal device or two of them mechanically stacked
         """ Use a single spectrum to get power from 2, 3, or 4 terminal tandem. If topJunctions = junctions the result is for 2 terminal tandem. """
+        # Most general case considered is two mechanically stacked devices. Each device has 2 terminals. Stack has 4 terminals.
         s.Irc = 0 # For top cell there is no radiative coupling from upper cell
         s.series( s.junctions-1, s.junctions-s.topJunctions, numBins, binIndex ) # For top stack, calculate power out for each spectra and add to Pout. topJunctions is number of juntions in top stack
         if not s.opticallyCoupledStacks:
@@ -362,9 +414,9 @@ class effs(object):
         s.series( s.junctions-s.topJunctions-1, 0, numBins, binIndex ) # For bottom stack, calculate power out for each spectra and add to Pout.
         return
             
-    def useBins(s, gi, discard): 
-        """Use spectral bins and s.gaps to calculate yearly energy yield and eff. gi speficies where to store results. Optionally discard bad results."""           
-        for numBins in s.bins: # loop for number of bins
+    def useBins( s, bins, results ): 
+        """Use spectral bins and s.gaps to calculate yearly energy yield and eff. Optionally discard bad results."""           
+        for numBins in bins: # loop for number of bins
             Pin = 0
             s.Itotal = 0
             s.Pout = 0
@@ -372,20 +424,20 @@ class effs(object):
                 s.stack( numBins, binIndex ) # Calculate power in/out for each spectra and add to Pin and Pout
                 Pin += s.P[ s.d, getSpectrumIndex( numBins, binIndex ) ] * s.timePerSpectra( numBins, binIndex ) # Yearly averaged daytime power in from the sun
             eff = s.Pout / Pin / s.concentration
-            if discard and numBins == s.bins[-1]:
-                if eff < ( s.effs[:, numBins].max() - s.effMin ):  
-                    return gi
-            s.effs[gi, numBins] = eff
-            s.Is[gi, numBins] = s.Itotal
-        s.auxEffs[gi, :] = np.zeros(s.junctions)+s.effs[gi, numBins]
-        s.auxIs[gi, :] = np.zeros(s.junctions)+s.Itotal 
-        return gi + 1
+            s.effs[results, numBins] = eff
+            s.Is[results, numBins] = s.Itotal
+        s.rgaps[results,:] = s.gaps
+        s.auxEffs[results, :] = np.zeros(s.junctions)+s.effs[results, numBins]
+        s.auxIs[results, :] = np.zeros(s.junctions)+s.Itotal
+        if eff < ( s.effs[:, numBins].max() - s.effMin ):  # Will overwrite this result if it is not good enough
+            return results
+        return results + 1
 
     def findGaps(s): 
         """ Calculate efficiencies for random band gap combinations. """
         startTime = time.time()
         ncells = 0 # Number of calculated gap combinations
-        nres = 0
+        results = 0
         effmax = 0
         Emin_ = np.array(Emin[s.junctions-1]) # Initial guess at where the eff maxima are. 
         Emax_ = np.array(Emax[s.junctions-1]) # The search space is expanded as needed if high eff are found at the edges of the search space.        
@@ -399,7 +451,7 @@ class effs(object):
         s.Is = np.zeros((s.cells, 22)) # Currents as a function of the number of spectral bins, 0 is standard spectrum, 10 is full spectral dataset
         s.effs = np.zeros((s.cells, 22)) # Efficiencies as a function of the number of spectral bins, 0 is standard spectrum, 10 is full spectral dataset
         fixedGaps = np.copy(s.gaps) # Copy input gaps to remember which ones are fixed, if gap==0 make it random
-        while (nres<s.cells): # Loop to randomly sample a large number of gap combinations
+        while (results<s.cells): # Loop to randomly sample a large number of gap combinations
             s.gaps = np.zeros(s.junctions)  
             lastgap = 0
             i = 0
@@ -428,13 +480,11 @@ class effs(object):
             
             if s.thinning:
                 s.thin()
-                
-            s.Itotal = 0
-            s.Pout = 0
-            s.stack( 1, 0 ) # calculate power out with average spectrum (1 bin).
-            eff = s.Pout/s.P[s.d, 1]/s.concentration # get efficiency
             
-            if (eff>effmax-s.effMin-0.01): # If gap combination is good, do more work on it
+            s.useBins( [2], results )
+            eff = s.effs[results, 2] # get rough estimate of efficiency
+            
+            if ( eff > effmax - s.effMin - 0.01 ): # If gap combination is good, do more work on it
                 for gi, gap in enumerate(s.gaps): # Expand edges of search space if any of the found gaps are near an edge
                     if gap < Emin_[gi] + 0.01: # Expand energy range allowed for each gap as needed
                         if Emin_[gi] > 0.5: # Only energies between 0.5 and 2.5 eV are included
@@ -449,12 +499,9 @@ class effs(object):
                             minDif_[gi-1] -= 0.01
                 if (eff>effmax):
                     effmax = eff
-                s.rgaps[nres, :] = s.gaps
-                s.effs[nres, 1] = eff 
-                s.Is[nres, 1] = s.Itotal 
-                nres = s.useBins(nres, True) # Calculate efficiency for s.gaps, store result if gaps are good
-                if nres % 10 == 0: # Show calculation progress from time to time
-                    print ('Tried '+str(ncells)+', got '+str(nres)+' candidate gap combinations.', end="\r")                                
+                results = s.useBins( s.bins, results ) # Calculate efficiency for s.gaps, store result if gaps are good
+                if results % 10 == 0: # Show calculation progress from time to time
+                    print ('Tried '+str(ncells)+', got '+str(results)+' candidate gap combinations.', end="\r")                                
             ncells += 1
         
         mask = s.auxEffs > s.auxEffs.max()-s.effMin
@@ -490,7 +537,7 @@ class effs(object):
         print ('Isc for optimal gaps (A/m2):', s.auxIs[imax, 0])
         print ('Isc range (A/m2):', s.auxIs.min(), '-', s.auxIs.max())
         
-    def plot(s):
+    def plot(s, dotSize=1, show=True):
         """ Saves efficiency plots to PNG files """ 
         res = np.size(s.rgaps)/s.junctions
         Is_ = np.copy(s.auxIs)
@@ -498,24 +545,21 @@ class effs(object):
         if s.convergence:
             plt.figure()
             plt.xlabel('Number of spectra')
-            plt.ylabel('Yearly efficiency error (%)')
+            plt.ylabel('Yearly efficiency overestimate (%)')
             plt.xticks(list(range(1,21)))
             plt.xlim(1,20)
             plt.ylim( 0, 1.01*( 100 * ( s.effs[ : , 1 ] - s.effs[ : , -1 ] ) ).max() )  
             plt.tick_params(axis='y', right='on')
             for i in range(0, int(res)):
-           #     diffs = []
-             #   for j in s.bins[:-1]:
-               #     diffs.append(100*(s.effs[i, j+1]-s.effs[i, j]))
                 plt.plot( range(1,21), 100*( s.effs[ i , 1:-1 ] - s.effs[ i , -1 ] ), color = LGBT(Is_[i,0]), linewidth=0.5) #  color = LGBT(auxIs[i*s.junctions])
-            plt.savefig(s.name+' '+s.specsFile.replace('.npy', '').replace('.','-')+' convergence '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+str(int(s.timeStamp)), dpi=600)
-            plt.show()
+            plt.savefig(s.name+' '+s.specsFile.replace('.npy', '').replace('.','-')+' convergence '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+s.autoSuffix, dpi=600)
+            if show:
+                plt.show()
         plt.figure()
         ymin = (s.effs[:, s.bins[-1]].max()-s.effMin)
         ymax = s.effs[:, s.bins[-1]].max() + 0.001
         plt.ylim(100*ymin, 100*ymax)
         plt.xlim(0.5, 2.5)
-        #plt.grid(True)
         plt.minorticks_on()
         plt.tick_params(direction='out', which='minor')
         plt.tick_params(direction='inout', pad=6)
@@ -533,32 +577,40 @@ class effs(object):
         plt.text(1.33, 100*s.auxEffs.max()+.2, 'E1')
         plt.plot([1.63, 1.63], [0, 100], c='grey', linewidth=0.5)
         plt.text(1.63, 100*s.auxEffs.max()+.2, 'E2')
-        plt.scatter(s.rgaps, 100*s.auxEffs, c=Is_, s=70000/len(s.effs[:, s.bins[-1]]), edgecolor='none', cmap=LGBT)
+        plt.scatter( s.rgaps, 100 * s.auxEffs, c=Is_, s = dotSize * 100000 / len( s.effs[ :, s.bins[ -1 ] ] ), edgecolor='none', cmap=LGBT)
         axb = plt.gca().twinx()
         axb.set_ylim(s.kWh(ymin),s.kWh(ymax))
         axb.set_ylabel('Yield $\mathregular{(kWh / m^2 / year)}$')
-        plt.savefig(s.name+' '+s.specsFile.replace('.npy', '').replace('.','-')+' '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+str(int(s.timeStamp)), dpi=600)
-        plt.show()        
+        plt.savefig(s.name+' '+s.specsFile.replace('.npy', '').replace('.','-')+' '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+s.autoSuffix, dpi=600)
+        if show:
+            plt.show()
+        plt.figure()
         plt.xlim(100*(s.auxEffs.max()-s.effMin), 100*s.auxEffs.max())
         plt.xlabel('Yearly averaged efficiency (%)')
         plt.ylabel('Count')
         plt.hist(100*s.effs[:, s.bins[-1]], bins=30)
-        plt.savefig(s.name+' Hist '+s.specsFile.replace('.npy', '').replace('.','-')+' '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+str(int(s.timeStamp)), dpi=600)      
-        plt.show()
+        plt.savefig(s.name+' Hist '+s.specsFile.replace('.npy', '').replace('.','-')+' '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+s.autoSuffix, dpi=600)      
+        if show:
+            plt.show()  
         
-    def save(s):
-        """ Saves data for later reuse/replotting. Path and file name set in eff.name, some parameters and timestamp are appended to filename """
-        with open(s.name+' '+s.specsFile.replace('.npy', '')+' '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+str(int(s.timeStamp)), "w") as f:
-            f.write(json_tricks.dumps(s))
-            
+    def save(s, saveSpectra=False):
+        """ Saves data for later reuse/replotting. Path and file name set in eff.name, some parameters and autoSuffix are appended to filename """
+        s2 = s
+        if not saveSpectra:
+            s2 = deepcopy(s)
+            s2.spectra = 0
+            s2.Iscs = 0
+        with open(s.name+' '+s.specsFile.replace('.npy', '')+' '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+s.autoSuffix, "wb") as f:
+            f.write( json_tricks.dumps( s2, compression=True ) )
+        
     def recalculate(s):
         """ Recalculate efficiencies with new set of input parameters using previously found gaps. Call __init__() to change parameters before recalculate() """
-        for gi in range(0, s.rgaps.shape[0]):
+        for gi in range( 0, s.rgaps.shape[0] ):
             s.gaps = s.rgaps[gi]
-            s.useBins(gi, False) # Calculate efficiency for s.gaps
+            s.useBins( s.bins, gi ) # Calculate efficiency for s.gaps
         s.results()
         
-    def compare(s, s0): 
+    def compare( s, s0, dotSize=1, show=True): 
         """ Plots relative differences of effiency for two results sets based on the same set of optimal band gap combinations. """
         print ('I min, I max : ', s.auxIs.min(), s.auxIs.max())
         print ('eff min, eff max : ', s.auxEffs.min(), s.auxEffs.max())
@@ -576,9 +628,10 @@ class effs(object):
             diff = s.kWh(s.auxEffs) - s0.kWh(s0.auxEffs)
             plt.ylabel('Yield change $\mathregular{(kWh / m^2 / year)}$')
         plt.xlabel('Current $\mathregular{(A/m^2)}$')
-        plt.scatter(s0.auxIs , diff , c=Is_ , s=20000/len(s.effs[:, s.bins[-1]]) , edgecolor='none', cmap=LGBT)
-        plt.savefig(s.name+'-'+s0.name.replace('/', '').replace('.', '')+' '+s.specsFile.replace('.npy', '').replace('/', '').replace('.', '')+'-'+s0.specsFile.replace('.npy', '').replace('/', '').replace('/', '')+' '+str(int(s0.junctions))+' '+str(int(s0.topJunctions))+' '+str(int(s0.concentration))+' '+str(int(s.timeStamp)), dpi=600)
-        plt.show()        
+        plt.scatter(s0.auxIs , diff , c=Is_ , s=dotSize*20000/len(s.effs[:, s.bins[-1]]) , edgecolor='none', cmap=LGBT)
+        plt.savefig(s.name+'-'+s0.name.replace('/', '').replace('.', '')+' '+s.specsFile.replace('.npy', '').replace('/', '').replace('.', '_')+'-'+s0.specsFile.replace('.npy', '').replace('/', '').replace('.','_')+' '+str(int(s0.junctions))+' '+str(int(s0.topJunctions))+' '+str(int(s0.concentration))+' '+s.autoSuffix, dpi=600)
+        if show:
+            plt.show()        
 
 # ---- End of Class effs ----
 
@@ -621,7 +674,7 @@ def show_assumptions(): # Shows the used EQE model and the AOD and PW statistica
 
 def generate_spectral_bins(latMin=40, latMax=40, longitude='random', 
         AOD='random', PW='random', tracking='38 -999 -999', 
-        speCount = 10000, NSRDBfile='', fname='spectra', saveFullSpectra = False, loadFullSpectra = False,
+        speCount = 20000, NSRDBfile='', fname='spectra', saveFullSpectra = False, loadFullSpectra = False,
         method='clusters', numFeatures = 200    ): # if method is set to anything else, Garcia's binning method will be used. DOI: 10.1002/pip.2943  
     
     def EPR(i, s1): 
