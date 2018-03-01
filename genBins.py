@@ -15,7 +15,7 @@ tandems.generate_spectral_bins(NSRDBfile='Indianapolis.csv')
 tandems.generate_spectral_bins(NSRDBfile='Philadelphia.csv')
 
 # Fixed lattitude, tracking for both global and direct spectra, random AOD and PW
-tandems.generate_spectral_bins(latMin=40,latMax=40,fname='lat40') 
+tandems.generate_spectral_bins(latMin=40,latMax=40,fname='lat40', saveFullSpectra=True) 
 
 # No tracking for global spectra, plane tilted 37 degrees
 tandems.generate_spectral_bins(latMin=40,latMax=40,tracking='38 37 180',fname='lat40tilted')
@@ -34,6 +34,11 @@ tandems.generate_spectral_bins(latMin=40,latMax=40,fname='lat40lowAOD',AOD=0.084
 
 # Random locations with -50 < Lattitude < 50
 tandems.generate_spectral_bins(latMin=-50,latMax=50,fname='randomLocations')
+
+specs = tandems.np.load('lat40.full.npy') 
+specs[0, :, :] = specs[0, :, :] - specs[1, :, :] # diffuse = Global - Direct 
+tandems.np.save('diffuse.full',specs)
+tandems.generate_spectral_bins(loadFullSpectra = True, fname='diffuse')
 
 # FUNCTION tandems.generate_spectral_bins(latMin=40 , latMax=40, longitude='random', AOD='random', PW='random', tracking=True, NSRDBfile='', fname='Iscs')
 

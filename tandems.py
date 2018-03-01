@@ -109,7 +109,7 @@ def load(fnames):
                     s.auxEffs = np.append(s.auxEffs,s2.auxEffs, axis=0)
                     s.Is = np.append(s.Is,s2.Is, axis=0)
                     s.effs = np.append(s.effs,s2.effs, axis=0)
-        s.cells = s.gaps.shape[0]
+        s.cells = s.rgaps.shape[0]
     else:
         print('Files not found')
     return s
