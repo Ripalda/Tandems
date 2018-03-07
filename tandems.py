@@ -889,7 +889,7 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
                     if accubin >= ( binIndex[ numBins ] + 1 ) * totalPower[d] / numBins: # check if power accumulated is a fraction of total power
                         binIndex[ numBins ] += 1 # Create new bin if it is
                         binlimits[d][ numBins - 1 ][ binIndex[ numBins ] ] = specIndex + 1 # Store bin limit
-                        timePerCluster[ d, getSpectrumIndex( numBins, binIndex[ numBins ] - 1 ) ] = specIndex + 1 - binlimits[d][ numBins - 1 ][ binIndex[ numBins ] - 1 ]
+                        timePerCluster[ d, getSpectrumIndex( numBins, binIndex[ numBins ] - 1 ) ] = ( specIndex + 1 - binlimits[d][ numBins - 1 ][ binIndex[ numBins ] - 1 ] ) / speCount
             for numBins in range(1, 21): #iterate over every bin set
                 binlimits[d][numBins-1][-1] = speCount # set the last bin limit to the total number of spectra
             # Average spectra using the previously calculated bin limits
