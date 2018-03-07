@@ -224,11 +224,14 @@ class effs(object):
         
         if '.clusters.npy' in s.specsFile:
             s.timePerCluster = np.load(s.specsFile.replace('.clusters.','.timePerCluster.')) # Fraction of the yearly daytime hours that is represented by each cluster of spectra
-            s.timePerCluster[0, 0] = 1 # These are for the standard reference spectra ASTM G173.
-            s.timePerCluster[1, 0] = 1
-        elif '.bins.npy' not in s.specsFile:
+        elif '.bins.npy' in s.specsFile:
+            s.timePerCluster = np.load(s.specsFile.replace('.bins.','.timePerBin.')) # Fraction of the yearly daytime hours that is represented by each cluster of spectra
+        else:
             print('File types for spectral sets should either be .clusters.npy or .bins.npy')
             return            
+        
+        s.timePerCluster[0, 0] = 1 # These are for the standard reference spectra ASTM G173.
+        s.timePerCluster[1, 0] = 1
         
         if s.cells == 1:
             s.rgaps = np.array([s.gaps])
@@ -346,10 +349,10 @@ class effs(object):
 
     def timePerSpectra(s, numBins, binIndex):
         """ Returns fraction of yearly daytime represented by each spectra """
-        if '.clusters.npy' in s.specsFile and numBins < 21:
+        if numBins < 21:
             return s.timePerCluster[ s.d, getSpectrumIndex(numBins, binIndex) ] # Fraction of yearly daytime represented by each spectra
         else:
-            return 1 / s.numSpectra[numBins] # Fraction of yearly daytime represented by each spectra. numSpectra = [1, 1, 2, 3, ...
+            return 1 / s.numSpectra[numBins]
 
     def series(s, topJ, bottomJ, numBins, binIndex):
         """ Get power from 2 terminal monolythic multijunction device. Series connected subcells with indexes topJ to bottomJ. topJ = bottomJ is single junction. """
@@ -543,6 +546,11 @@ class effs(object):
         Is_ = np.copy(s.auxIs)
         Is_ = (Is_-Is_.min())/(Is_.max()-Is_.min())
         if s.convergence:
+
+            ec = 100*( s.effs[ : , 1:-1 ] - s.effs[ : , -1 ][:, None] )
+            ecm = np.mean( ec, axis=0 )
+            ece = np.sqrt ( np.mean( ( ec - ecm )**2, axis = 0 ) )
+            
             plt.figure()
             plt.xlabel('Number of spectra')
             plt.ylabel('Yearly efficiency overestimate (%)')
@@ -551,10 +559,25 @@ class effs(object):
             plt.ylim( 0, 1.01*( 100 * ( s.effs[ : , 1 ] - s.effs[ : , -1 ] ) ).max() )  
             plt.tick_params(axis='y', right='on')
             for i in range(0, int(res)):
-                plt.plot( range(1,21), 100*( s.effs[ i , 1:-1 ] - s.effs[ i , -1 ] ), color = LGBT(Is_[i,0]), linewidth=0.5) #  color = LGBT(auxIs[i*s.junctions])
+                plt.plot( range(1,21), ec[i,:], color = LGBT(Is_[i,0]), linewidth=0.5) #  color = LGBT(auxIs[i*s.junctions])
             plt.savefig(s.name+' '+s.specsFile.replace('.npy', '').replace('.','-')+' convergence '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+s.autoSuffix, dpi=600)
             if show:
                 plt.show()
+                
+            if False: # Set to True to plot mean
+                plt.figure()
+                plt.xlabel('Number of spectra')
+                plt.ylabel('Yearly efficiency overestimate (%)')
+                plt.xticks(list(range(1,21)))
+                plt.xlim(1,20)
+                plt.ylim( 0, 1.01*( ecm + ece )[0] )  
+                plt.tick_params(axis='y', right='on')
+                plt.plot( range(1,21), ecm, color = 'b') #  color = LGBT(auxIs[i*s.junctions])
+                plt.fill_between( range(1,21), ecm - ece , ecm + ece, facecolor='red')
+                plt.savefig(s.name+' '+s.specsFile.replace('.npy', '').replace('.','-')+' convergence_ '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+s.autoSuffix, dpi=600)
+                if show:
+                    plt.show()
+            
         plt.figure()
         ymin = (s.effs[:, s.bins[-1]].max()-s.effMin)
         ymax = s.effs[:, s.bins[-1]].max() + 0.001
@@ -610,28 +633,49 @@ class effs(object):
             s.useBins( s.bins, gi ) # Calculate efficiency for s.gaps
         s.results()
         
-    def compare( s, s0, dotSize=1, show=True): 
+    def compare( s, s0, dotSize=1, show=True, r1=(0.8,0.1,0,0.8), r2=(1,0.1,0,0.4), b1=(0,0.1,1,0.8), b2=(0,0.1,1,0.4)): 
         """ Plots relative differences of effiency for two results sets based on the same set of optimal band gap combinations. """
         print ('I min, I max : ', s.auxIs.min(), s.auxIs.max())
         print ('eff min, eff max : ', s.auxEffs.min(), s.auxEffs.max())
         Is_ = np.copy(s0.auxIs)
         Is_ = (Is_-Is_.min())/(Is_.max()-Is_.min())
-
-        plt.figure()
-        plt.minorticks_on()
-        plt.tick_params(direction='out', which='minor')
-        plt.tick_params(direction='inout', pad=6)
-        if s.specsFile == s0.specsFile:
-            diff = 100*(s.auxEffs - s0.auxEffs)
-            plt.ylabel('Efficiency change (%)')
-        else: # It does not make much sense to compare efficiencies if spectra are different, compare energy yield instead
-            diff = s.kWh(s.auxEffs) - s0.kWh(s0.auxEffs)
-            plt.ylabel('Yield change $\mathregular{(kWh / m^2 / year)}$')
-        plt.xlabel('Current $\mathregular{(A/m^2)}$')
-        plt.scatter(s0.auxIs , diff , c=Is_ , s=dotSize*20000/len(s.effs[:, s.bins[-1]]) , edgecolor='none', cmap=LGBT)
-        plt.savefig(s.name+'-'+s0.name.replace('/', '').replace('.', '')+' '+s.specsFile.replace('.npy', '').replace('/', '').replace('.', '_')+'-'+s0.specsFile.replace('.npy', '').replace('/', '').replace('.','_')+' '+str(int(s0.junctions))+' '+str(int(s0.topJunctions))+' '+str(int(s0.concentration))+' '+s.autoSuffix, dpi=600)
-        if show:
-            plt.show()        
+        if s.convergence:
+            plt.figure()
+            plt.xlabel('Number of spectra')
+            plt.ylabel('Yearly efficiency overestimate (%)')
+            plt.xticks(list(range(1,21)))
+            plt.xlim(1,20) 
+            plt.tick_params(axis='y', right='on')
+            ec = 100*( s.effs[ : , 1:-1 ] - s.effs[ : , -1 ][:, None] )
+            ecm = np.mean( ec, axis=0 )
+            ece = np.sqrt ( np.mean( ( ec - ecm )**2, axis = 0 ) )
+            plt.ylim( 0, 1.01*( ecm + ece )[0] ) 
+            plt.plot( range(1,21), ecm, color =b1) #  color = LGBT(auxIs[i*s.junctions])
+            plt.fill_between( range(1,21), ecm - ece , ecm + ece, facecolor=b2)
+            ec = 100*( s0.effs[ : , 1:-1 ] - s0.effs[ : , -1 ][:, None] )
+            ecm = np.mean( ec, axis=0 )
+            ece = np.sqrt ( np.mean( ( ec - ecm )**2, axis = 0 ) )
+            plt.plot( range(1,21), ecm, color =r1) #  color = LGBT(auxIs[i*s.junctions])
+            plt.fill_between( range(1,21), ecm - ece , ecm + ece, facecolor=r2)
+            plt.savefig(s.name+' '+s.specsFile.replace('.npy', '').replace('.','-')+' convergence compare '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+s.autoSuffix, dpi=600)
+            if show:
+                plt.show()
+        else:        
+            plt.figure()
+            plt.minorticks_on()
+            plt.tick_params(direction='out', which='minor')
+            plt.tick_params(direction='inout', pad=6)
+            if s.specsFile == s0.specsFile:
+                diff = 100*(s.auxEffs - s0.auxEffs)
+                plt.ylabel('Efficiency change (%)')
+            else: # It does not make much sense to compare efficiencies if spectra are different, compare energy yield instead
+                diff = s.kWh(s.auxEffs) - s0.kWh(s0.auxEffs)
+                plt.ylabel('Yield change $\mathregular{(kWh / m^2 / year)}$')
+            plt.xlabel('Current $\mathregular{(A/m^2)}$')
+            plt.scatter(s0.auxIs , diff , c=Is_ , s=dotSize*20000/len(s.effs[:, s.bins[-1]]) , edgecolor='none', cmap=LGBT)
+            plt.savefig(s.name+'-'+s0.name.replace('/', '').replace('.', '')+' '+s.specsFile.replace('.npy', '').replace('/', '').replace('.', '_')+'-'+s0.specsFile.replace('.npy', '').replace('/', '').replace('.','_')+' '+str(int(s0.junctions))+' '+str(int(s0.topJunctions))+' '+str(int(s0.concentration))+' '+s.autoSuffix, dpi=600)
+            if show:
+                plt.show()        
 
 # ---- End of Class effs ----
 
@@ -723,6 +767,9 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
 
     elif loadFullSpectra: # To reuse a full set of spectra saved earlier 
         fullSpectra = np.load(fname+'.full.npy')
+        speCount = fullSpectra.shape[1]
+        EPR650 = np.zeros((2, speCount)) # Ivan Garcia's criteria for binning, store EPR value for each spectrum
+        P = np.zeros((2, speCount)) # Power for each spectrum
         attempts = fullSpectra[-1,-1,-1]
         fullSpectra[-1,-1,-1] = 0
         
@@ -841,7 +888,8 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
                 for numBins in range(1, 21):
                     if accubin >= ( binIndex[ numBins ] + 1 ) * totalPower[d] / numBins: # check if power accumulated is a fraction of total power
                         binIndex[ numBins ] += 1 # Create new bin if it is
-                        binlimits[d][ numBins - 1 ][ binIndex[ numBins ] ] = specIndex+1 # Store bin limit     
+                        binlimits[d][ numBins - 1 ][ binIndex[ numBins ] ] = specIndex + 1 # Store bin limit
+                        timePerCluster[ d, getSpectrumIndex( numBins, binIndex[ numBins ] - 1 ) ] = specIndex + 1 - binlimits[d][ numBins - 1 ][ binIndex[ numBins ] - 1 ]
             for numBins in range(1, 21): #iterate over every bin set
                 binlimits[d][numBins-1][-1] = speCount # set the last bin limit to the total number of spectra
             # Average spectra using the previously calculated bin limits
@@ -853,6 +901,7 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
                 for binIndex in range(0, numBins): #bin counter
                     spectra[d, specIndex, :] = binspecs[d][numBins-1][binIndex,:]
                     specIndex += 1
+        np.save(fname+'.timePerBin', timePerCluster)
         fname += '.bins'
     
     spectra[0, 0, -1] = speCount/attempts # This number is needed to calculate the yearly averaged power yield including night time hours. 
