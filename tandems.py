@@ -612,9 +612,10 @@ class effs(object):
         Is_ = (Is_-Is_.min())/(Is_.max()-Is_.min())
         if s.convergence:
 
-            ec = 100*( s.effs[ : , 1:-1 ] - s.effs[ : , -1 ][:, None] )
+            ec = 100*(s.effs[:, 1:-1] - s.effs[:, -1][:, None])
             ecm = np.mean( ec, axis=0 )
-            ece = np.sqrt ( np.mean( ( ec - ecm )**2, axis = 0 ) )
+            # 99.9% confidence margin
+            ece = 3.29 * np.sqrt (np.sum((ec - ecm)**2, axis = 0) / (ec.shape[0] - 1))
             
             plt.figure()
             plt.xlabel('Number of spectra')
@@ -628,7 +629,7 @@ class effs(object):
             plt.savefig(s.name+' '+s.specsFile.replace('.npy', '').replace('.','-')+' convergence '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+s.autoSuffix, dpi=600)
             if show:
                 plt.show()
-                
+            
             if False: # Set to True to plot mean
                 plt.figure()
                 plt.xlabel('Number of spectra')
@@ -708,20 +709,25 @@ class effs(object):
             plt.figure()
             plt.xlabel('Number of spectra')
             plt.ylabel('Yearly efficiency overestimate (%)')
-            plt.xticks(list(range(1,21)))
-            plt.xlim(1,20) 
+            #plt.xticks(list(range(1,21)))
+            plt.xlim(1,20)
+            ejes = plt.gca()
+            ejes.xaxis.set_major_locator(plt.MultipleLocator(5))
+            ejes.xaxis.set_major_locator(plt.MultipleLocator(1))
             plt.tick_params(axis='y', right='on')
             ec = 100*( s.effs[ : , 1:-1 ] - s.effs[ : , -1 ][:, None] )
             ecm = np.mean( ec, axis=0 )
-            ece = np.sqrt ( np.mean( ( ec - ecm )**2, axis = 0 ) )
-            plt.ylim( 0, 1.01*( ecm + ece )[0] ) 
-            plt.plot( range(1,21), ecm, color =b1) #  color = LGBT(auxIs[i*s.junctions])
-            plt.fill_between( range(1,21), ecm - ece , ecm + ece, facecolor=b2)
+            # 99.9% confidence margin
+            ece = 3.29 * np.sqrt (np.sum((ec - ecm)**2, axis = 0) / (ec.shape[0] - 1))
+            plt.ylim( 0, 1.05*( ecm + ece )[1] ) 
+            plt.scatter( range(1,21), ecm + ece, marker='v', s=80, c=b2)
+            plt.scatter( range(1,21), ecm, marker='_', s=80, c=b1) #  color = LGBT(auxIs[i*s.junctions])
             ec = 100*( s0.effs[ : , 1:-1 ] - s0.effs[ : , -1 ][:, None] )
             ecm = np.mean( ec, axis=0 )
-            ece = np.sqrt ( np.mean( ( ec - ecm )**2, axis = 0 ) )
-            plt.plot( range(1,21), ecm, color =r1) #  color = LGBT(auxIs[i*s.junctions])
-            plt.fill_between( range(1,21), ecm - ece , ecm + ece, facecolor=r2)
+            # 99.9% confidence margin
+            ece = 3.29 * np.sqrt (np.sum((ec - ecm)**2, axis = 0) / (ec.shape[0] - 1))
+            plt.scatter( range(1,21), ecm + ece, marker='v', s=80, c=r2)
+            plt.scatter( range(1,21), ecm, marker='_', s=80, c=r1) #  color = LGBT(auxIs[i*s.junctions])
             plt.savefig(s.name+' '+s.specsFile.replace('.npy', '').replace('.','-')+' convergence compare '+str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+s.autoSuffix, dpi=600)
             if show:
                 plt.show()
