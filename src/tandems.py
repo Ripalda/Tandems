@@ -15,10 +15,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import time
-import pdb
+import pdb 
 import json_tricks
-from copy import deepcopy
-import os.path
+from copy import deepcopy #.............
+# import os.path
 import subprocess as sub
 from datetime import datetime
 from glob import glob
@@ -26,6 +26,13 @@ from sklearn.cluster import FeatureAgglomeration
 from sklearn.cluster import KMeans
 from scipy import integrate
 import scipy.constants as con
+import os
+Dpath = os.path.dirname(__file__) 
+if Dpath == "":
+    Dpath= "data/"
+else:
+    Dpath = Dpath +  "/data/"
+
 hc = con.h*con.c
 q = con.e
 
@@ -38,7 +45,7 @@ colors = [(1, 0, 1), (0, 0, 1), (0, 1, 1), (0, 1, 0), (1, 1, 0), (1, 0, 0)]  # B
 LGBT = LinearSegmentedColormap.from_list('LGBT', colors, 500)
 
 # Load standard reference spectra ASTM G173
-wavel, g1_5, d1_5 = np.loadtxt("AM1_5 smarts295.ext.txt", delimiter=',', usecols=(0,1,2), unpack=True)
+wavel, g1_5, d1_5 = np.loadtxt(Dpath + "AM1_5 smarts295.ext.txt", delimiter=',', usecols=(0,1,2), unpack=True)
 Energies = 1e9*hc/q/wavel # wavel is wavelenght in nm
 
 # 2D Array for spectral bin indexing. 
@@ -92,14 +99,26 @@ minDif.append([0.30, 0.40, 0.40, 0.45])  # 5 junctions
 maxDif.append([0.50, 0.50, 0.40, 0.40, 0.50])
 minDif.append([0.28, 0.28, 0.32, 0.32, 0.42])  # 6 junctions
 
-#Varshni, Y. P. Temperature dependence of the energy gap in semiconductors. Physica 34, 149 (1967)
-#Gives gap correction in eV relative to 300K using GaAs parameters. T in K
-# Beware, using GaAs parameters slightly overestimates the effect for most other semiconductors
 def Varshni(T): 
+    """
+    Varshni, Y. P. Temperature dependence of the energy gap in
+    semiconductors.  Physica 34, 149 (1967) 
+    Args:
+        T (float): Temperature in K
+    returns:
+        float : the gap of the GaAs.
+
+    Gives gap correction in eV relative to 300K using GaAs parameters. T in K
+    Beware, using GaAs parameters slightly overestimates the effect for most
+    other semiconductors"""
     return (T**2)/(T+572)*-8.871e-4+0.091558486 
 
-def load(fnames): 
+def load(fnames, folder=Dpath): 
     """ Load previously saved effs objects. 
+    Args:
+        fnames (str): File name, 
+        Dptah (str, optional): Folder to look for the files
+
     tandems.load('/path/and_file_name_pattern*here')
     A file name pattern with wildcards (*) can be used to 
     load a number of files and join them in a single object. 
@@ -108,7 +127,7 @@ def load(fnames):
     does not check if it makes sense to join the output files.
     """
     s = False
-    arrayOfFiles = glob(fnames)
+    arrayOfFiles = glob(folder+fnames)
     if arrayOfFiles:
         for fname in arrayOfFiles:
             with open(fname, "rb") as f:         
@@ -820,8 +839,8 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
 
     if NSRDBfile != '': # Optionally Load specified National Solar Resource DataBase spectra
         # https://maps.nrel.gov 
-        Ng = np.loadtxt(NSRDBfile, skiprows=3, delimiter=',', usecols=tuple(range(159, 310))) # Global Horizontal
-        Nd = np.loadtxt(NSRDBfile, skiprows=3, delimiter=',', usecols=tuple(range(8, 159))) # Direct spectra
+        Ng = np.loadtxt(Dpath + NSRDBfile, skiprows=3, delimiter=',', usecols=tuple(range(159, 310))) # Global Horizontal
+        Nd = np.loadtxt(Dpath + NSRDBfile, skiprows=3, delimiter=',', usecols=tuple(range(8, 159))) # Direct spectra
         attempts = Nd.shape[0]
         if fname == 'spectra':
             fname = NSRDBfile.replace('.csv', '')
@@ -852,7 +871,7 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
         AOD2 = AOD
         PW2 = PW
         #os.chdir('/path to your SMARTS files')
-        with open ('smarts295.in_.txt', "r") as fil: # Load template for SMARTS input file
+        with open (Dpath + 'smarts295.in_.txt', "r") as fil: # Load template for SMARTS input file
             t0 = fil.readlines()
         t0 = ''.join(t0)
         attempts = 0
@@ -873,7 +892,7 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
                 t2 = datetime.fromtimestamp(3155673600.0*np.random.rand()+1517958000.0).strftime("%Y %m %d %H")+' ' # from 7/feb/2018 to 7/feb/2018
                 t2 += '%.2f' % ((latMax-latMin)*np.arccos(2*np.random.rand()-1)/np.pi+latMin)+' '  # 50 > Latitude > -50
                 t2 += '%.2f' % (longitude2)+' 0\t\t\t!Card 17a Y M D H Lat Lon Zone\n\n'
-                with open('smarts295.inp.txt' , "w") as fil:
+                with open(Dpath + 'smarts295.inp.txt' , "w") as fil:
                     fil.write(t1+t2)
                 try:
                     os.remove("smarts295.ext.txt")
@@ -888,7 +907,7 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
                 tama = os.stat('smarts295.ext.txt').st_size # check output file
                 if tama>0:
                     try: # load output file if it exists
-                        s1 = np.loadtxt("smarts295.ext.txt", delimiter=' ', usecols=(0, 1, 2), unpack=True, skiprows=1)#Global Tilted = 1, Direct Normal= 2, Diffuse Horizontal=3
+                        s1 = np.loadtxt(Dpath + "smarts295.ext.txt", delimiter=' ', usecols=(0, 1, 2), unpack=True, skiprows=1)#Global Tilted = 1, Direct Normal= 2, Diffuse Horizontal=3
                     except:
                         tama = 0
             EPR(specIndex, s1[1:,:]) # Calculates EPR, integrates Power and stores spectra
@@ -978,6 +997,6 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
     np.save(fname, spectra)    
     
 def docs(): # Shows HELP file
-    with open('HELP', 'r') as fin:
+    with open('../docs/HELP', 'r') as fin:
         print (fin.read())
         

@@ -1,4 +1,6 @@
-# This pyhton script can be used to generate the .npy files with the spectra used to calculate the yearly energy yield
+# -*- coding: utf-8 -*-
+"""This pyhton script can be used to generate the .npy files with the spectra
+used to calculate the yearly energy yield"""
 
 import tandems
 
