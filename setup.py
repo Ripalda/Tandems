@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """The setup script only setups the 
-environment to be used with the tandem class"""
+environment to be used with the tandems module"""
 
 from setuptools import setup, find_packages
 
@@ -12,17 +12,15 @@ with open('README.md') as readme_file:
 # with open('HISTORY.rst') as history_file:
     # history = history_file.read()
 
-requirements = ['numpy', 'scipy', 'matplotlib','json_tricks', 
-]
-
+requirements = ['numpy', 'scipy', 'matplotlib','json_tricks', 'sklearn']
 
 setup(
-    name='Tandem',
+    name='tandems',
     version='1',
     description="""Machine Learning for realistic yearly averaged photovoltaic
     efficiency calculations""",
     long_description=readme + '\n\n',# + history,
-    author="J.M. ipalda",
+    author="J.M. Ripalda",
     author_email='ripalda@imm.cnm.csic.es',
     url='https://github.com/Ripalda/Tandems',
     packages=find_packages(include=['tandems']),
@@ -36,8 +34,8 @@ setup(
         'Intended Audience :: Science',
         'License :: OSI Approved :: MIT License',
         'Natural Language :: English',
-        "Programming Language :: Python :: 2",
-        'Programming Language :: Python :: 2.7',
+        "Programming Language :: Python :: 3",
+        'Programming Language :: Python :: 3.6',
     ],
     # test_suite='tests',
     # tests_require=test_requirements,
