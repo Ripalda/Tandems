@@ -16,7 +16,7 @@ requirements = ['numpy', 'scipy', 'matplotlib','json_tricks', 'sklearn']
 
 setup(
     name='tandems',
-    version='1',
+    version='0.70',
     description="""Machine Learning for realistic yearly averaged photovoltaic
     efficiency calculations""",
     long_description=readme + '\n\n',# + history,
