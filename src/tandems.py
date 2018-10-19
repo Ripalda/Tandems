@@ -9,7 +9,7 @@ from __future__ import division
 from __future__ import print_function
 
 __author__ = 'Jose M. Ripalda'
-__version__ = 62
+__version__ = 0.70
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -27,12 +27,11 @@ from sklearn.cluster import MiniBatchKMeans
 from sklearn.cluster import AgglomerativeClustering # Ward , Complete linkage, Average linkage
 from sklearn.cluster import Birch
 from sklearn.cluster import SpectralClustering
-from sklearn.cluster import DBSCAN
-from sklearn.cluster import MeanShift
 from sklearn.preprocessing import normalize
 from scipy import integrate
 import scipy.constants as con
 import os
+
 Dpath = os.path.dirname(__file__) # Data files here
 if Dpath == "":
     Dpath= "data/"
@@ -46,6 +45,7 @@ print ('Tandems version', __version__)
 
 # Make Numpy print 3 decimal places only
 np.set_printoptions(precision=3)
+
 # Define colors for plots
 colors = [(1, 0, 1), (0, 0, 1), (0, 1, 1), (0, 1, 0), (1, 1, 0), (1, 0, 0)]  # B -> G -> R
 LGBT = LinearSegmentedColormap.from_list('LGBT', colors, 500)
@@ -54,15 +54,15 @@ LGBT = LinearSegmentedColormap.from_list('LGBT', colors, 500)
 wavel, g1_5, d1_5 = np.loadtxt(Dpath + "AM1_5 smarts295.ext.txt", delimiter=',', usecols=(0,1,2), unpack=True)
 Energies = 1e9*hc/q/wavel # wavel is wavelenght in nm
 
-binMax = 31 # Maximum number of clusters/bins + 1
+binMax = 31 # Maximum number of clusters (or bins) + 1
 # 2D Array for spectral bin indexing.
-#First index is number of bins, second is bin index.
+# First index is number of bins, second is bin index.
 specIndexArray = []
 specIndexArray.append([0])
 specIndex = 1
-for numBins in range(1, binMax): #bin set
+for numBins in range(1, binMax): # bin set
     specIndexArray.append([])
-    for binIndex in range(0, numBins):  #bin counter
+    for binIndex in range(0, numBins):  # bin counter
         specIndexArray[numBins].append(specIndex)
         specIndex += 1
 specMax = specIndex
@@ -76,68 +76,19 @@ def getSpectrumIndex(numBins,binIndex):
 
 def Varshni(T):
     """
-    Varshni, Y. P. Temperature dependence of the energy gap in
-    semiconductors.  Physica 34, 149 (1967)
-    Args:
+    Input parameter:
         T (float): Temperature in K
     returns:
-        float : the gap of the GaAs.
+        float : the band gap energy correction relative to 300K.
 
     Gives gap correction in eV relative to 300K using GaAs parameters. T in K
     Beware, using GaAs parameters slightly overestimates the effect for most
     other semiconductors
+    
+    Varshni, Y. P. Temperature dependence of the energy gap in
+    semiconductors.  Physica 34, 149 (1967)
     """
     return (T**2)/(T+572)*-8.871e-4+0.091558486
-
-def load(fnames):
-    """ Load previously saved effs objects.
-    Args:
-        fnames (str): File name,
-        Dptah (str, optional): Folder to look for the files
-
-    tandems.load('/path/and_file_name_pattern*here')
-    A file name pattern with wildcards (*) can be used to
-    load a number of files and join them in a single object.
-    This is useful for paralelization.
-    All files need to share the same set of input parameters because this function
-    does not check if it makes sense to join the output files.
-    """
-    s = False
-    arrayOfFiles = glob(fnames)
-    if arrayOfFiles:
-        for fname in arrayOfFiles:
-            with open(fname, "rb") as f:
-                if not s:
-                    s = json_tricks.loads(f.read())
-                else:
-                    s2 = json_tricks.loads(f.read())
-                    s.rgaps = np.append(s.rgaps,s2.rgaps, axis=0)
-                    s.auxIs = np.append(s.auxIs,s2.auxIs, axis=0)
-                    s.auxEffs = np.append(s.auxEffs,s2.auxEffs, axis=0)
-                    s.Is = np.append(s.Is,s2.Is, axis=0)
-                    s.effs = np.append(s.effs,s2.effs, axis=0)
-        s.cells = s.rgaps.shape[0]
-    else:
-        print('Files not found')
-    return s
-
-def multiFind( cores = 2, saveAs = 'someParallelData',
-              parameterStr = 'cells=1000, junctions=4'):
-    """Hack to use as many CPU cores as desired in the search for optimal band gaps.
-    Uses the tandems.effs object and its findGaps method.
-    Total number of results will be cores * cells.
-    Calls bash (so do not expect this function to work under Windows)
-    Creates many instances of this python module running in parallel.
-    """
-    os.system('for i in `seq 1 '+str(cores)
-                +'`; do python -c "import tandems;s=tandems.effs(name='
-                +chr(39)+saveAs+chr(39)+','
-                +parameterStr+');s.findGaps();s.save()" & done; wait')
-    # Loads all calculation results and joins them in a single object
-    s = load(saveAs+'*')
-    s.results()
-    s.plot()
-
 
 class effs(object):
     """ Object class to hold results sets of yearly average photovoltaic efficiency
@@ -150,7 +101,7 @@ class effs(object):
 
     #    Include as many or as few options as needed.
     eff = tandems.effs(junctions=4, bins=6, concentration=500)
-    eff.findGaps()
+    eff.findGaps() # Find set of optimal gap combinations.
     eff.plot() # Figures saved to PNG files.
 
     eff.save() # Data saved for later reuse/replotting. Path and file name set in eff.name, some parameters and autoSuffix are appended to filename
@@ -182,7 +133,7 @@ class effs(object):
     thinSpec = 1  # Spectrum used to calculate subcell thinning for current matching. Integer index in spectra array.
     effMin = 0.02  # Lowest sampled efficiency value relative to maximum efficiency. Gaps with lower efficiency are discarded.
     d = 1  # 0 for global spectra, 1 for direct spectra
-    # T = 70 for a 1mm2 cell at 1000 suns bonded to copper substrate. Cite I. Garcia, in CPV Handbook, ed. by: I. Rey-Stolle, C. Algora
+    # T = 70 for a 1mm2 cell at 1000 suns bonded to copper substrate. Cite I. Garcia et al., in CPV Handbook, ed. by: I. Rey-Stolle, C. Algora
     name = './Test'  # Can optionally include path to destination of generated files. Example: "/home/documents/test". Some parameters and autoSuffix are appended to filename
     cells = 1000  # Target number of calculated tandem cells. Actual number of results will be less.
     R = 5e-7  # Series resistance of each stack in Ohm*m2. Default is optimistic value for high concentration devices
@@ -225,7 +176,7 @@ class effs(object):
     # ---- Methods and functions ----
 
     def __init__(s, **kwargs):
-        """ Call __init__ to change input parameters without discarding
+        """ Call __init__ if you want to change input parameters without discarding
         previously found gaps before calling recalculate()
         """
 
@@ -346,7 +297,7 @@ class effs(object):
         maximize current under spectrum given in .thinSpec
         """
         # Only of interest in a few special cases with constrained band gaps.
-        # NOT FULLY TESTED
+        # THIS FUNCTION IS NOT FULLY TESTED AND SELDOM USED
         # Top cell thinning:
         # - From top to bottom junction
         #       - If next current is lower:
@@ -562,13 +513,12 @@ class effs(object):
         maxDif.append([0.50, 0.50, 0.40, 0.40, 0.50])
         minDif.append([0.28, 0.28, 0.32, 0.32, 0.42])  # 6 junctions
 
-
         Emin_ = np.array(Emin[s.junctions-1]) # Initial guess at where the eff maxima are.
         Emax_ = np.array(Emax[s.junctions-1]) # The search space is expanded as needed if high eff are found at the edges of the search space.
         minDif_ = np.array(minDif[s.junctions-2])
         maxDif_ = np.array(maxDif[s.junctions-2])
-        # REMOVE SEED unless you want to reuse the same sequence of random numbers (e.g.: compare results after changing one parameter)
-        #np.random.seed(07022015)
+        # Remove comment on np.random.seed if you want to reuse the same sequence of random numbers (e.g.: compare results after changing one parameter)
+        # np.random.seed(07022015)
         s.rgaps = np.zeros((s.cells, s.junctions)) # Gaps
         s.auxIs = np.zeros((s.cells, s.junctions)) # Aux array for plotting only
         s.auxEffs = np.zeros((s.cells, s.junctions)) # Aux array for plotting only
@@ -591,7 +541,7 @@ class effs(object):
                 if fixedGaps[i] == 0:
                     s.gaps[i] = Emini + Erange * np.random.rand() #define random gaps
                 else:
-                    s.gaps[i] = fixedGaps[i] # Any gaps with a value other than 0 are kept fixed, example: tandems.effs(gaps=[0.7, 0, 0, 1.424, 0, 2.1]) .
+                    s.gaps[i] = fixedGaps[i] # Any gaps with an initial input value other than 0 are kept fixed, example: tandems.effs(gaps=[0.7, 0, 0, 1.424, 0, 2.1])
                 if i>0 and fixedGaps.sum(): # If there are fixed gaps check gaps are not too unevenly spaced
                     if not ( 0.1 < s.gaps[i]-lastgap < 1 ): # gap difference is not in range
                         lastgap = 0 # Discard gaps and restart if gaps are too unevenly spaced
@@ -668,13 +618,6 @@ class effs(object):
         Is_ = np.copy(s.auxIs)
         Is_ = (Is_-Is_.min())/(Is_.max()-Is_.min())
         if s.convergence:
-            xticks = list(range(1, binMax))
-            xticklabels = list(range(1, binMax))
-            for i,tick in enumerate(xticks):
-                if tick % 2 != 0:
-                    xticklabels[i]=''
-                else:
-                    xticklabels[i]=str(tick)
             ec = 100*(s.effs[:, 1:-1] - s.effs[:, -1][:, None])
             ecm = np.median( ec, axis=0 )
             emax = np.ndarray.max( ec, axis=0 )
@@ -685,29 +628,29 @@ class effs(object):
             plt.figure()
             plt.xlabel('Number of spectra')
             plt.ylabel('Yearly efficiency overestimate (%)')
-            plt.xticks(xticks, xticklabels)
             plt.xlim(0.3, binMax - 0.3)
             #plt.ylim( 0, 1.05*( 100 * ( s.effs[ : , 1 ] - s.effs[ : , -1 ] ) ).max() )
             plt.ylim(0.02, 4)
             plt.tick_params(axis='y', right='on')
             ax = plt.gca()
             ax.set_yscale('log')
+            ax.xaxis.set_major_locator(plt.MultipleLocator(2))
             for i in range(0, int(res)):
                 plt.scatter( range(1, binMax), ec[i,:], color = np.array([0,0,0,1]), s=100, marker='_', linewidth=0.3)
-                #plt.plot( range(1, binMax), ecm, color = 'blue', linewidth=2)
             plt.savefig(s.name+' '+s.specsFile.replace('.npy', '').replace('.','-')+' convergence '+s.filenameSuffix, dpi=600)
             if show:
                 plt.show()
 
-            if True: # Set to True to plot mean
+            if True: # Set to True to plot quartiles
                 plt.figure()
                 plt.xlabel('Number of spectra')
                 plt.ylabel('Yearly efficiency overestimate (%)')
-                plt.xticks(xticks, xticklabels)
                 plt.xlim(1, binMax - 1)
                 plt.ylim( 0.02, 4 )
                 ax = plt.gca()
+                plt.grid(which='y')
                 ax.set_yscale('log')
+                ax.xaxis.set_major_locator(plt.MultipleLocator(2))
                 plt.tick_params(axis='y', right='on')
                 plt.plot( range(1, binMax), ecm, color = '#0077BB')
                 plt.fill_between( range(1, binMax), eq1 , eq3, facecolor=np.array([0, 0.6, 0.8, 0.32]))
@@ -782,11 +725,9 @@ class effs(object):
             plt.figure()
             plt.xlabel('Number of spectra')
             plt.ylabel('Yearly efficiency overestimate (%)')
-            #plt.xticks(list(range(1, binMax)))
             plt.xlim(1, binMax - 1)
             ejes = plt.gca()
-            ejes.xaxis.set_major_locator(plt.MultipleLocator(5))
-            ejes.xaxis.set_major_locator(plt.MultipleLocator(1))
+            ejes.xaxis.set_major_locator(plt.MultipleLocator(2))
             plt.tick_params(axis='y', right='on')
             ec = 100*( s.effs[ : , 1:-1 ] - s.effs[ : , -1 ][:, None] )
             ecm = np.mean( ec, axis=0 )
@@ -820,6 +761,55 @@ class effs(object):
                 plt.show()
 
 # ---- End of Class effs ----
+
+def load(fnames):
+    """ Load previously saved effs objects.
+    Args:
+        fnames (str): File name,
+        Dptah (str, optional): Folder to look for the files
+
+    tandems.load('/path/and_file_name_pattern*here')
+    A file name pattern with wildcards (*) can be used to
+    load a number of files and join them in a single object.
+    This is useful for paralelization.
+    All files need to share the same set of input parameters because this function
+    does not check if it makes sense to join the output files.
+    """
+    s = False
+    arrayOfFiles = glob(fnames)
+    if arrayOfFiles:
+        for fname in arrayOfFiles:
+            with open(fname, "rb") as f:
+                if not s:
+                    s = json_tricks.loads(f.read())
+                else:
+                    s2 = json_tricks.loads(f.read())
+                    s.rgaps = np.append(s.rgaps,s2.rgaps, axis=0)
+                    s.auxIs = np.append(s.auxIs,s2.auxIs, axis=0)
+                    s.auxEffs = np.append(s.auxEffs,s2.auxEffs, axis=0)
+                    s.Is = np.append(s.Is,s2.Is, axis=0)
+                    s.effs = np.append(s.effs,s2.effs, axis=0)
+        s.cells = s.rgaps.shape[0]
+    else:
+        print('Files not found')
+    return s
+
+def multiFind( cores = 2, saveAs = 'someParallelData',
+              parameterStr = 'cells=1000, junctions=4'):
+    """Hack to use as many CPU cores as desired in the search for optimal band gaps.
+    Uses the tandems.effs object and its findGaps method.
+    Total number of results will be cores * cells.
+    Calls bash (so do not expect this function to work under Windows)
+    Creates many instances of this python module running in parallel.
+    """
+    os.system('for i in `seq 1 '+str(cores)
+                +'`; do python -c "import tandems;s=tandems.effs(name='
+                +chr(39)+saveAs+chr(39)+','
+                +parameterStr+');s.findGaps();s.save()" & done; wait')
+    # Loads all calculation results and joins them in a single object
+    s = load(saveAs+'*')
+    s.results()
+    s.plot()
 
 def show_assumptions(): # Shows the used EQE model and the AOD and PW statistical distributions
     s0 = effs()
@@ -981,8 +971,8 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
         np.save(fname+'.full', fullSpectra)
 
     totalPower = np.zeros(2)
+    RMS = np.zeros((2, binMax - 1))
     binlimits = []
-    binspecs = []
     spectra = np.zeros( (2, specMax, len(wavel)) ) # Prepare data structure for saving to file
     timePerCluster = np.zeros( (2, specMax) ) # Each spectrum is representative of this fraction of yearly daytime
 
@@ -1027,7 +1017,7 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
                     killSmall = False
                 # k-means # Find clusters of spectra
                 if clustersCount == 1 or submethod == 'kmeans':
-                    clusters = KMeans(n_clusters=clustersCount+extraClusters).fit(specFeat[d,:,:])
+                    clusters = KMeans(n_clusters=clustersCount+extraClusters, n_jobs=-1, n_init=4).fit(specFeat[d,:,:])
                 else:
                     if submethod == 'birch':
                         clusters = Birch(n_clusters=clustersCount, threshold=0.01).fit(specFeat[d,:,:])
@@ -1061,8 +1051,7 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
                         labels, spectraPerCluster = np.unique(clusters.labels_, return_counts=True)
                         # Update cluster centers
                         for label in labels:
-                            clusters.cluster_centers_[label] = specFeat[d, clusters.labels_ == label, :].mean(axis=0)
-    
+                            clusters.cluster_centers_[label] = specFeat[d, clusters.labels_ == label, :].mean(axis=0) 
                     else:
                         for i in range(1, extraClusters+1):
                             # Find smaller cluster
@@ -1082,8 +1071,14 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
                             clusters.cluster_centers_[partner] = (spectraPerCluster[partner] * clusters.cluster_centers_[partner] + smallerCount * smallerCluster) / (spectraPerCluster[partner] + smallerCount)
                             spectraPerCluster[partner] += smallerCount
 
-                for binIndex in range(0,clustersCount):
-                    spectra[d, specIndex+binIndex, :] = fullSpectra[d, clusters.labels_ == binIndex, :].mean(axis=0)
+                inertia = np.zeros(fullSpectra.shape[-1])
+                for binIndex in range(0, clustersCount):
+                    espectros = fullSpectra[d, clusters.labels_ == binIndex, :]
+                    center = espectros.mean(axis=0) # Find average of spectra in cluster
+                    inertia += ((espectros - center)**2).sum(axis=0) # This is used to have diagnostics of the RMS error in the spectra classification
+                    spectra[d, specIndex+binIndex, :] = center
+                inertia = integrate.trapz(inertia, x=wavel)/(wavel[-1] - wavel[0])
+                RMS[d, clustersCount-1] = np.sqrt(inertia / fullSpectra.shape[1])
                 timePerCluster[d, specIndex:(specIndex+clustersCount)] = spectraPerCluster / speCount
                 specIndex += clustersCount
                 print('Number of clusters:', clustersCount, '   ', end="\r")
@@ -1100,13 +1095,11 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
             P[d, :] = P[d, np.argsort(EPR650[d,:])]
             totalPower[d] = P[d, :].sum() # Sum power
             binlimits.append([])
-            binspecs.append([])
             binIndex = np.zeros(binMax, dtype=np.int)
             # Prepare data structure to store bin limits and averaged spectra.
             # numBins is total number of bins
             for numBins in range(1, binMax):
                 binlimits[d].append( np.zeros( numBins+1, dtype=np.int ) )
-                binspecs[d].append( np.zeros( ( numBins, len(wavel) ) ) )
             accubin = 0
             # Calculate bin limits with equal power in each bin
             for specIndex in range(0, speCount):
@@ -1118,26 +1111,41 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
                         binIndex[ numBins ] += 1 # Create new bin if it is
                         binlimits[d][ numBins - 1 ][ binIndex[ numBins ] ] = specIndex + 1 # Store bin limit
                         timePerCluster[ d, getSpectrumIndex( numBins, binIndex[ numBins ] - 1 ) ] = ( specIndex + 1 - binlimits[d][ numBins - 1 ][ binIndex[ numBins ] - 1 ] ) / speCount
-            for numBins in range(1, binMax): #iterate over every bin set
-                # set the last bin limit to the total number of spectra
-                binlimits[d][numBins-1][-1] = speCount
             # Average spectra using the previously calculated bin limits
-            for numBins in range(1, binMax):
-                for binIndex in range(0, numBins):
-                    binspecs[d][numBins-1][binIndex,:] = np.mean( fullSpectra[d, binlimits[d][numBins-1][binIndex]:binlimits[d][numBins-1][binIndex+1]], axis=0 ) # mean each bin
             specIndex = 1
-            for numBins in range(1, binMax): # number of bins
-                for binIndex in range(0, numBins): #bin counter
-                    spectra[d, specIndex, :] = binspecs[d][numBins-1][binIndex,:]
+            for numBins in range(1, binMax): # iterate over every bin set
+                inertia = np.zeros(fullSpectra.shape[-1])
+                binlimits[d][numBins-1][-1] = speCount # set the last bin limit to the total number of spectra
+                for binIndex in range(0, numBins):
+                    espectros = fullSpectra[d, binlimits[d][numBins-1][binIndex]:binlimits[d][numBins-1][binIndex+1]]
+                    center = espectros.mean(axis=0) # mean each bin
+                    spectra[d, specIndex, :] = center 
+                    inertia += ((espectros - center)**2).sum(axis=0)
                     specIndex += 1
+                inertia = integrate.trapz(inertia, x=wavel)/(wavel[-1] - wavel[0])
+                RMS[d, numBins-1] = np.sqrt(inertia / fullSpectra.shape[1])
+                    
         np.save(fname+'.timePerBin', timePerCluster)
         fname += '.bins'
 
     # speCount/attempts is needed to calculate the yearly averaged power yield including night time hours.
     spectra[0, 0, -1] = speCount/attempts
     np.save(fname, spectra)
+    
+    if True: # Set to True to plot RMS/inertia of each bin/cluster
+        plt.figure()
+        plt.xlabel('Number of spectra')
+        plt.ylabel('RMS (W m$^{-2}$ nm$^{-1}$)')
+        plt.xlim(0.1, binMax-0.3)
+        plt.ylim( 0.020, 0.105 )
+        ejes = plt.gca()
+        ejes.xaxis.set_major_locator(plt.MultipleLocator(2))
+        plt.tick_params(axis='y', right='on')
+        # plt.scatter( range(1, binMax), RMS[1], c = '#FF00FF', edgecolor='none', label='Binning') # Plot RMS for each cluster / bin for direct normal + circumsolar spectra
+        plt.scatter( range(1, binMax), RMS[1], c = 'none', edgecolor='#0077BB', label='Clustering') # Plot RMS for each cluster / bin for direct normal + circumsolar spectra
+        plt.legend(frameon=False)
+        plt.savefig('RMS'+str(int(10*time.time())), dpi=600)
 
 def docs(): # Shows HELP file
     with open('../docs/HELP', 'r') as fin:
         print (fin.read())
-
