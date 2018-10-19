@@ -4,6 +4,7 @@ Calculate yearly average efficiencies for multijunction tandem solar cells
 Random sampling of multijunction photovoltaic efficiencies. Jose M. Ripalda
 
 The main file is tandems.py
+
 genBins.py imports tandems.py to generate sets of proxy spectra 
 
 Import tandems from the current path or
