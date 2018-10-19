@@ -6,7 +6,7 @@ Random sampling of multijunction photovoltaic efficiencies. Jose M. Ripalda
 <!--Requires doing "pip install json_tricks" before running-->
 To install:
 ```bash
-python setup.py install -e . --user
+python setup.py install --user
 ```
 
 Tested with Python 2.7 and 3.6
