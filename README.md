@@ -3,6 +3,13 @@ Calculate yearly average efficiencies for multijunction tandem solar cells
 
 Random sampling of multijunction photovoltaic efficiencies. Jose M. Ripalda
 
+The main file is tandems.py
+genBins.py imports tandems.py to generate sets of proxy spectra 
+
+Import tandems from the current path or
+move all files to your standard location for python modules.
+This would be something like ~/.local/lib/python3.6/site-packages/
+
 <!--Requires doing "pip install json_tricks" before running-->
 
 Tested with Python 2.7 and 3.6
@@ -10,7 +17,6 @@ Tested with Python 2.7 and 3.6
 SMARTS 2.9.5 is required only to generate a new set of random spectra. 
 
 File "lat40.npy" can be used instead of SMARTS to load a set of averaged spectra.
-
 
 Project Organization
 --------------------
