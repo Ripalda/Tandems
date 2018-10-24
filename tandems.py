@@ -1,6 +1,5 @@
 # Yearly averaged photovoltaic efficiencies.
 # Tested with Python 2.7 and 3.6
-# Requires "pip install json_tricks"
 # SMARTS 2.9.5 and sklearn are required only to generate new sets of spectra.
 # Provided files with ".npy" extension can be used instead to load a set of spectra.
 
@@ -9,14 +8,14 @@ from __future__ import division
 from __future__ import print_function
 
 __author__ = 'Jose M. Ripalda'
-__version__ = 0.70
+__version__ = 0.71
 
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import time
 import pdb
-import json_tricks
+import pickle
 from copy import deepcopy
 import subprocess as sub
 from datetime import datetime
@@ -84,7 +83,7 @@ def Varshni(T):
     Gives gap correction in eV relative to 300K using GaAs parameters. T in K
     Beware, using GaAs parameters slightly overestimates the effect for most
     other semiconductors
-    
+
     Varshni, Y. P. Temperature dependence of the energy gap in
     semiconductors.  Physica 34, 149 (1967)
     """
@@ -638,6 +637,7 @@ class effs(object):
             for i in range(0, int(res)):
                 plt.scatter( range(1, binMax), ec[i,:], color = np.array([0,0,0,1]), s=100, marker='_', linewidth=0.3)
             plt.savefig(s.name+' '+s.specsFile.replace('.npy', '').replace('.','-')+' convergence '+s.filenameSuffix, dpi=600)
+            plt.savefig(s.name+' '+s.specsFile.replace('.npy', '').replace('.','-')+' convergence '+s.filenameSuffix+'.svg')
             if show:
                 plt.show()
 
@@ -684,7 +684,7 @@ class effs(object):
         plt.scatter( s.rgaps, 100 * s.auxEffs, c=Is_, s = dotSize * 100000 / len( s.effs[ :, s.bins[ -1 ] ] ), edgecolor='none', cmap=LGBT)
         axb = plt.gca().twinx()
         axb.set_ylim(s.kWh(ymin),s.kWh(ymax))
-        axb.set_ylabel('Yield $\mathregular{(kWh / m^2 / year)}$')
+        axb.set_ylabel('Yield $\mathregular{(kWh \ m^{-2} \ year^{-1})}$')
         plt.savefig(s.name+' '+s.specsFile.replace('.npy', '').replace('.','-')+' '+s.filenameSuffix, dpi=600)
         if show:
             plt.show()
@@ -706,7 +706,7 @@ class effs(object):
             s2.spectra = 0
             s2.Iscs = 0
         with open(s.name+' '+s.specsFile.replace('.npy', '')+' '+s.filenameSuffix, "wb") as f:
-            f.write( json_tricks.dumps( s2, compression=True ) )
+            pickle.dump(s2, f, pickle.HIGHEST_PROTOCOL)
 
     def recalculate(s):
         """ Recalculate efficiencies with new set of input parameters using previously found gaps. Call __init__() to change parameters before recalculate() """
@@ -753,8 +753,8 @@ class effs(object):
                 plt.ylabel('Efficiency change (%)')
             else: # It does not make much sense to compare efficiencies if spectra are different, compare energy yield instead
                 diff = s.kWh(s.auxEffs) - s0.kWh(s0.auxEffs)
-                plt.ylabel('Yield change $\mathregular{(kWh / m^2 / year)}$')
-            plt.xlabel('Current $\mathregular{(A/m^2)}$')
+                plt.ylabel('Yield change $\mathregular{(kWh \ m^{-2} \ year^{-1})}$')
+            plt.xlabel('Current $\mathregular{(A \ m^{-2})}$')
             plt.scatter(s0.auxIs , diff , c=Is_ , s=dotSize*20000/len(s.effs[:, s.bins[-1]]) , edgecolor='none', cmap=LGBT)
             plt.savefig(s.name+'-'+s0.name.replace('/', '').replace('.', '')+' '+s.specsFile.replace('.npy', '').replace('/', '').replace('.', '_')+'-'+s0.specsFile.replace('.npy', '').replace('/', '').replace('.','_')+' '+str(int(s0.junctions))+' '+str(int(s0.topJunctions))+' '+str(int(s0.concentration))+' '+s.autoSuffix, dpi=600)
             if show:
@@ -781,9 +781,9 @@ def load(fnames):
         for fname in arrayOfFiles:
             with open(fname, "rb") as f:
                 if not s:
-                    s = json_tricks.loads(f.read())
+                    s = pickle.load(f)
                 else:
-                    s2 = json_tricks.loads(f.read())
+                    s2 = pickle.load(f)
                     s.rgaps = np.append(s.rgaps,s2.rgaps, axis=0)
                     s.auxIs = np.append(s.auxIs,s2.auxIs, axis=0)
                     s.auxEffs = np.append(s.auxEffs,s2.auxEffs, axis=0)
@@ -1022,7 +1022,7 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
                     if submethod == 'birch':
                         clusters = Birch(n_clusters=clustersCount, threshold=0.01).fit(specFeat[d,:,:])
                     elif submethod == 'spectral':
-                        clusters = SpectralClustering(n_clusters=clustersCount, 
+                        clusters = SpectralClustering(n_clusters=clustersCount,
                         eigen_solver='arpack', affinity='nearest_neighbors').fit(specFeat[d,:,:])
                     elif submethod == 'ward':
                         clusters = AgglomerativeClustering(n_clusters=clustersCount+extraClusters, linkage='ward').fit(specFeat[d,:,:])
@@ -1038,7 +1038,7 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
                 if killSmall:
                     if dissolve: # Dissolve small clusters and then merge each spectra with the closest cluster
                                  # Alternativelly merge clusters as a whole
-                                 # Testing with synthetic spectra suggests dissolve works slightly better                    
+                                 # Testing with synthetic spectra suggests dissolve works slightly better
                         for i in range(1, extraClusters+1):
                             # Find smaller cluster
                             smallerLabel = labels[np.argmin(spectraPerCluster)]
@@ -1051,7 +1051,7 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
                         labels, spectraPerCluster = np.unique(clusters.labels_, return_counts=True)
                         # Update cluster centers
                         for label in labels:
-                            clusters.cluster_centers_[label] = specFeat[d, clusters.labels_ == label, :].mean(axis=0) 
+                            clusters.cluster_centers_[label] = specFeat[d, clusters.labels_ == label, :].mean(axis=0)
                     else:
                         for i in range(1, extraClusters+1):
                             # Find smaller cluster
@@ -1119,19 +1119,19 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
                 for binIndex in range(0, numBins):
                     espectros = fullSpectra[d, binlimits[d][numBins-1][binIndex]:binlimits[d][numBins-1][binIndex+1]]
                     center = espectros.mean(axis=0) # mean each bin
-                    spectra[d, specIndex, :] = center 
+                    spectra[d, specIndex, :] = center
                     inertia += ((espectros - center)**2).sum(axis=0)
                     specIndex += 1
                 inertia = integrate.trapz(inertia, x=wavel)/(wavel[-1] - wavel[0])
                 RMS[d, numBins-1] = np.sqrt(inertia / fullSpectra.shape[1])
-                    
+
         np.save(fname+'.timePerBin', timePerCluster)
         fname += '.bins'
 
     # speCount/attempts is needed to calculate the yearly averaged power yield including night time hours.
     spectra[0, 0, -1] = speCount/attempts
     np.save(fname, spectra)
-    
+
     if True: # Set to True to plot RMS/inertia of each bin/cluster
         plt.figure()
         plt.xlabel('Number of spectra')
@@ -1141,10 +1141,13 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
         ejes = plt.gca()
         ejes.xaxis.set_major_locator(plt.MultipleLocator(2))
         plt.tick_params(axis='y', right='on')
-        # plt.scatter( range(1, binMax), RMS[1], c = '#FF00FF', edgecolor='none', label='Binning') # Plot RMS for each cluster / bin for direct normal + circumsolar spectra
-        plt.scatter( range(1, binMax), RMS[1], c = 'none', edgecolor='#0077BB', label='Clustering') # Plot RMS for each cluster / bin for direct normal + circumsolar spectra
+        if method == 'clusters':
+            plt.scatter( range(1, binMax), RMS[1], c = 'none', edgecolor='#0077BB', label='Clustering') # Plot RMS for each cluster / bin for direct normal + circumsolar spectra
+        else:
+            plt.scatter( range(1, binMax), RMS[1], c = '#FF00FF', edgecolor='none', label='Binning') # Plot RMS for each cluster / bin for direct normal + circumsolar spectra
         plt.legend(frameon=False)
         plt.savefig('RMS'+str(int(10*time.time())), dpi=600)
+        plt.savefig('RMS'+str(int(10*time.time()))+'.svg')
 
 def docs(): # Shows HELP file
     with open('../docs/HELP', 'r') as fin:
