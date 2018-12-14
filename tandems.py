@@ -8,7 +8,7 @@ from __future__ import division
 from __future__ import print_function
 
 __author__ = 'Jose M. Ripalda'
-__version__ = 0.71
+__version__ = 0.83
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -52,7 +52,6 @@ LGBT = LinearSegmentedColormap.from_list('LGBT', colors, 500)
 # Load standard reference spectra ASTM G173
 wavel, g1_5, d1_5 = np.loadtxt(Dpath + "AM1_5 smarts295.ext.txt", delimiter=',', usecols=(0,1,2), unpack=True)
 Energies = 1e9*hc/q/wavel # wavel is wavelenght in nm
-
 binMax = 31 # Maximum number of clusters (or bins) + 1
 # 2D Array for spectral bin indexing.
 # First index is number of bins, second is bin index.
@@ -167,7 +166,7 @@ class effs(object):
     Iscs = []  # Array with current in each spectrum
     thinTrans = 1  # Array with transmission of each subcell
     autoSuffix = ''
-    daytimeFraction = 1
+    daytimeFraction = 1 # Needed to calculate the yearly averaged power yield including night time hours.
     numSpectra = [1]+list(range(1, binMax))+[10000] # Number of spectra as a function of numBins
     timePerCluster = 0  # Fraction of the yearly daytime hours that is represented by each cluster of spectra. Set in __init__
     filenameSuffix = '' # Part of automatic filenaming
@@ -472,6 +471,21 @@ class effs(object):
             return results
         return results + 1
 
+    def mask(s, mask):
+        """ Discard or sort results according to mask
+        """
+        s.rgaps = s.rgaps[mask, :]
+        s.auxIs = s.auxIs[mask, :]
+        s.auxEffs = s.auxEffs[mask, :] # [:, 0]
+        s.effs = s.effs[mask, :]
+        s.Is = s.Is[mask, :]
+        # As a side effect of this masking, arrays are flattened
+        s.rgaps = np.reshape(s.rgaps, (-1, s.junctions)) # Restore proper array shapes after masking
+        s.auxIs = np.reshape(s.auxIs, (-1, s.junctions))
+        s.auxEffs = np.reshape(s.auxEffs, (-1, s.junctions))
+        s.effs = np.reshape(s.effs, (-1, binMax + 1))
+        s.Is = np.reshape(s.Is, (-1, binMax + 1))
+
     def findGaps(s):
         """ Calculate efficiencies for random band gap combinations. """
         startTime = time.time()
@@ -578,20 +592,9 @@ class effs(object):
                     print ('Tried '+str(ncells)+', got '+str(results)+' candidate gap combinations.           ', end="\r")
             ncells += 1
 
-        mask = s.auxEffs > s.auxEffs.max()-s.effMin
-        s.rgaps = s.rgaps[mask] # Discard results below the efficiency threshold set by effMin
-        s.auxIs = s.auxIs[mask] # As a side effect of this cut off, arrays are flattened
-        s.auxEffs = s.auxEffs[mask] # [:, 0]
-        threshold = s.effs[:, s.bins[-1]].max()-s.effMin
-        mask = s.effs[:, s.bins[-1]] > threshold
-        s.effs = s.effs[mask]
-        s.Is = s.Is[mask]
-
-        s.rgaps = np.reshape(s.rgaps, (-1, s.junctions)) # Restore proper array shapes after masking
-        s.auxIs = np.reshape(s.auxIs, (-1, s.junctions))
-        s.auxEffs = np.reshape(s.auxEffs, (-1, s.junctions))
-        s.effs = np.reshape(s.effs, (-1, binMax + 1))
-        s.Is = np.reshape(s.Is, (-1, binMax + 1))
+        threshold = s.effs[:, s.bins[-1]].max() - s.effMin
+        mask = s.effs[:, s.bins[-1]] > threshold # Discard results below the efficiency threshold set by effMin
+        s.mask(mask)
 
         tiempo = int(time.time()-startTime)
         res = np.size(s.rgaps)/s.junctions
@@ -606,6 +609,7 @@ class effs(object):
         """ After findGaps() or recalculate(), or load(), this function shows the main results """
         print ('Maximum efficiency:', s.auxEffs.max())
         print ('Maximum yearly energy yield:', s.kWh(s.auxEffs.max()))
+        print('P sun',365.25*24 * s.P[s.d,1] / 1000, 'cloudCover', s.cloudCover, 'daytimeFraction', s.daytimeFraction)
         imax = np.argmax(s.auxEffs[:, 0])
         print ('Optimal gaps:', s.rgaps[imax])
         print ('Isc for optimal gaps (A/m2):', s.auxIs[imax, 0])
@@ -636,8 +640,8 @@ class effs(object):
             ax.xaxis.set_major_locator(plt.MultipleLocator(2))
             for i in range(0, int(res)):
                 plt.scatter( range(1, binMax), ec[i,:], color = np.array([0,0,0,1]), s=100, marker='_', linewidth=0.3)
-            plt.savefig(s.name+' '+s.specsFile.replace('.npy', '').replace('.','-')+' convergence '+s.filenameSuffix, dpi=600)
-            plt.savefig(s.name+' '+s.specsFile.replace('.npy', '').replace('.','-')+' convergence '+s.filenameSuffix+'.svg')
+            plt.savefig(s.name+' ' + s.specsFile.replace('.npy', '').replace('.','-') + ' convergence ' + s.filenameSuffix, dpi=300, bbox_inches="tight")
+            plt.savefig(s.name+' ' + s.specsFile.replace('.npy', '').replace('.','-') + ' convergence ' + s.filenameSuffix + '.svg', bbox_inches="tight")
             if show:
                 plt.show()
 
@@ -655,7 +659,8 @@ class effs(object):
                 plt.plot( range(1, binMax), ecm, color = '#0077BB')
                 plt.fill_between( range(1, binMax), eq1 , eq3, facecolor=np.array([0, 0.6, 0.8, 0.32]))
                 plt.fill_between( range(1, binMax), emin , emax, facecolor=np.array([0, 0.6, 0.8, 0.32]))
-                plt.savefig(s.name+' '+s.specsFile.replace('.npy', '').replace('.','-')+' convergence_ '+s.filenameSuffix, dpi=600)
+                plt.savefig(s.name+' ' + s.specsFile.replace('.npy', '').replace('.','-') +
+                            ' convergence_ ' + s.filenameSuffix, dpi=300, bbox_inches="tight")
                 if show:
                     plt.show()
 
@@ -685,7 +690,26 @@ class effs(object):
         axb = plt.gca().twinx()
         axb.set_ylim(s.kWh(ymin),s.kWh(ymax))
         axb.set_ylabel('Yield $\mathregular{(kWh \ m^{-2} \ year^{-1})}$')
-        plt.savefig(s.name+' '+s.specsFile.replace('.npy', '').replace('.','-')+' '+s.filenameSuffix, dpi=600)
+        plt.savefig(s.name+' ' + s.specsFile.replace('.npy', '').replace('.','-') +
+                    ' ' + s.filenameSuffix, dpi=300, bbox_inches="tight")
+
+        plt.figure()
+        plt.ylim(100*ymin, 100*ymax)
+        plt.minorticks_on()
+        plt.tick_params(direction='out', which='minor')
+        plt.tick_params(direction='inout', pad=6)
+        plt.ylabel('Yearly averaged efficiency (%)')
+        plt.xlabel('Current $\mathregular{(A \ m^{-2})}$')
+        Is_ = np.copy(s.Is[:, s.bins[-1]])
+        Is_ = (Is_-Is_.min())/(Is_.max()-Is_.min())
+        plt.scatter( s.Is[:, s.bins[-1]], 100 * s.effs[:, s.bins[-1]], c=Is_,
+                    s = dotSize * 100000 / len(s.effs[:, s.bins[-1]]), edgecolor='none', cmap=LGBT)
+        axb = plt.gca().twinx()
+        axb.set_ylim(s.kWh(ymin),s.kWh(ymax))
+        axb.set_ylabel('Yield $\mathregular{(kWh \ m^{-2} \ year^{-1})}$')
+        plt.savefig(s.name + ' I ' + s.specsFile.replace('.npy', '').replace('.','-') +
+                    ' ' + s.filenameSuffix, dpi=300, bbox_inches="tight")
+
         if show:
             plt.show()
         if False: # Set to True to plot histograms
@@ -694,7 +718,8 @@ class effs(object):
             plt.xlabel('Yearly averaged efficiency (%)')
             plt.ylabel('Count')
             plt.hist(100*s.effs[:, s.bins[-1]], bins=30)
-            plt.savefig(s.name+' Hist '+s.specsFile.replace('.npy', '').replace('.','-')+' '+s.filenameSuffix, dpi=600)
+            plt.savefig(s.name + ' Hist ' + s.specsFile.replace('.npy', '').replace('.','-') +
+                        ' ' + s.filenameSuffix, dpi=300, bbox_inches="tight")
         if show:
             plt.show()
 
@@ -707,6 +732,24 @@ class effs(object):
             s2.Iscs = 0
         with open(s.name+' '+s.specsFile.replace('.npy', '')+' '+s.filenameSuffix, "wb") as f:
             pickle.dump(s2, f, pickle.HIGHEST_PROTOCOL)
+
+    def purge(s, percentile = 90, span = 100):
+        """ Delete suboptimal devices. The percertile determines how many devices at each current are retained.
+        This is useful before recalculate and compare.
+        """
+        newOrder = np.argsort(s.Is[:, s.bins[-1]]) # Sort all data in order of increasing current
+        s.mask(newOrder)
+
+        maxEffs = np.copy(s.effs[:, s.bins[-1]]) # Create new array for storing the efficiency threshold at each current
+        # Find efficiency threshold at each current given by percentile of the
+        # population given by +/- span datapoints around each current
+        # adjust span to be a small fraction of the total number of data points
+        for i, eff in enumerate(s.effs[:, s.bins[-1]]):
+            mini = max(0, i - span)
+            maxi = min(s.effs[:, s.bins[-1]].shape[0], i + span)
+            maxEffs[i] = np.percentile(s.effs[mini:maxi, s.bins[-1]], percentile)
+        mask = s.effs[:, s.bins[-1]] > maxEffs
+        s.mask(mask)
 
     def recalculate(s):
         """ Recalculate efficiencies with new set of input parameters using previously found gaps. Call __init__() to change parameters before recalculate() """
@@ -740,7 +783,8 @@ class effs(object):
             ece = np.sqrt (np.sum((ec - ecm)**2, axis = 0) / (ec.shape[0] - 1))
             plt.scatter( range(1, binMax), ecm + ece, marker='v', s=80, c=r2)
             plt.scatter( range(1, binMax), ecm, marker='_', s=80, c=r1) #  color = LGBT(auxIs[i*s.junctions])
-            plt.savefig(s.name+' '+s.specsFile.replace('.npy', '').replace('.','-')+' convergence compare '+s.filenameSuffix, dpi=600)
+            plt.savefig(s.name+' ' + s.specsFile.replace('.npy', '').replace('.','-') +
+                        ' convergence compare ' + s.filenameSuffix, dpi=300, bbox_inches="tight")
             if show:
                 plt.show()
         else:
@@ -748,15 +792,16 @@ class effs(object):
             plt.minorticks_on()
             plt.tick_params(direction='out', which='minor')
             plt.tick_params(direction='inout', pad=6)
-            if s.specsFile == s0.specsFile:
-                diff = 100*(s.auxEffs - s0.auxEffs)
-                plt.ylabel('Efficiency change (%)')
-            else: # It does not make much sense to compare efficiencies if spectra are different, compare energy yield instead
-                diff = s.kWh(s.auxEffs) - s0.kWh(s0.auxEffs)
-                plt.ylabel('Yield change $\mathregular{(kWh \ m^{-2} \ year^{-1})}$')
+            plt.ylabel('Energy yield change (%)')
+            percentChange = 100 * (s.kWh(s.auxEffs) - s0.kWh(s0.auxEffs)) / s0.kWh(s0.auxEffs)
             plt.xlabel('Current $\mathregular{(A \ m^{-2})}$')
-            plt.scatter(s0.auxIs , diff , c=Is_ , s=dotSize*20000/len(s.effs[:, s.bins[-1]]) , edgecolor='none', cmap=LGBT)
-            plt.savefig(s.name+'-'+s0.name.replace('/', '').replace('.', '')+' '+s.specsFile.replace('.npy', '').replace('/', '').replace('.', '_')+'-'+s0.specsFile.replace('.npy', '').replace('/', '').replace('.','_')+' '+str(int(s0.junctions))+' '+str(int(s0.topJunctions))+' '+str(int(s0.concentration))+' '+s.autoSuffix, dpi=600)
+            plt.scatter(s0.auxIs , percentChange , c=Is_ , s=dotSize*20000/len(s.effs[:, s.bins[-1]]) , edgecolor='none', cmap=LGBT)
+            plt.savefig(s.name + '-' + s0.name.replace('/', '').replace('.', '') + ' ' +
+                        s.specsFile.replace('.npy', '').replace('/', '').replace('.', '_') +
+                        '-' + s0.specsFile.replace('.npy', '').replace('/', '').replace('.','_') +
+                        ' ' + str(int(s0.junctions)) + ' ' + str(int(s0.topJunctions)) +
+                        ' ' + str(int(s0.concentration)) + ' ' + s.autoSuffix,
+                        dpi=300, bbox_inches="tight")
             if show:
                 plt.show()
 
@@ -1146,8 +1191,8 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
         else:
             plt.scatter( range(1, binMax), RMS[1], c = '#FF00FF', edgecolor='none', label='Binning') # Plot RMS for each cluster / bin for direct normal + circumsolar spectra
         plt.legend(frameon=False)
-        plt.savefig('RMS'+str(int(10*time.time())), dpi=600)
-        plt.savefig('RMS'+str(int(10*time.time()))+'.svg')
+        plt.savefig('RMS' + str(int(10*time.time())), dpi=300, bbox_inches="tight")
+        plt.savefig('RMS' + str(int(10*time.time())) + '.svg', bbox_inches="tight")
 
 def docs(): # Shows HELP file
     with open('../docs/HELP', 'r') as fin:
