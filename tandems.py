@@ -8,7 +8,7 @@ from __future__ import division
 from __future__ import print_function
 
 __author__ = 'Jose M. Ripalda'
-__version__ = 0.83
+__version__ = 0.86
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -191,7 +191,6 @@ class effs(object):
         if type(s.bins) == int:
             s.bins = [s.bins]
 
-        # Fraction of the yearly daytime hours that is represented by each cluster of spectra
         if '.clusters.npy' in s.specsFile:
             s.timePerCluster = np.load(Dpath + s.specsFile.replace('.clusters.','.timePerCluster.'))
         elif '.bins.npy' in s.specsFile:
@@ -215,7 +214,7 @@ class effs(object):
         s.spectra = np.load(Dpath + s.specsFile) # Load binned or clustered spectra
         # s.daytimeFraction is the fraction of daytime hours in a year and is
         # Needed to calculate the yearly averaged power yield including night time hours.
-        s.daytimeFraction = s.spectra[0, 0, -1]
+        s.daytimeFraction = s.spectra[0, 0, -1] # It is hidden here when the spectra are loaded.
         s.spectra[0, 0, -1] = 0
         # These are for the standard reference spectra ASTM G173.
         s.spectra[0, 0, :] = g1_5
@@ -238,9 +237,11 @@ class effs(object):
 
         def integra(d, specIndex):
             """ Integrate spectra from UV to given wavelength """
+
             # Power per unit area ( W / m2 )
             s.P[d, specIndex] = integrate.trapz(s.spectra[d, specIndex, :],
                                                    x=wavel)
+            
             # Current per unit area ( A / m2 ), wavelength in nm
             s.Iscs[d, specIndex, :] = (q/hc)*np.insert(1e-9*integrate.cumtrapz(
                     s.EQE*s.spectra[d, specIndex, :]*wavel, x=wavel), 0, 0)
@@ -256,13 +257,14 @@ class effs(object):
             s.d = 1  # use direct spectra
         else:
             s.d = 0  # use global spectra
-            s.coe = 1  # There is no concentrator. optical efficiency = 1
         s.filenameSuffix = str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+s.autoSuffix
 
     def intSpec(s, energy, specIndex):
-        """ Returns integrated photocurrent from given photon energy to UV """
-        # interpolate integrated spectra. Wavelength in nm
-        return np.interp(1e9*hc/energy/q, wavel, s.Iscs[s.d, specIndex, :])
+        """ Interpolate integrated spectra. Wavelength in nm
+        Returns integrated photocurrent from given photon energy to UV
+        """
+        opticalTrans = np.array([1, s.coe])
+        return opticalTrans[s.d] * np.interp(1e9*hc/energy/q, wavel, s.Iscs[s.d, specIndex, :])
 
     def getIjx(s, specIndex):
         """ Get cell T and external I in each junction at 1 sun,
@@ -733,22 +735,24 @@ class effs(object):
         with open(s.name+' '+s.specsFile.replace('.npy', '')+' '+s.filenameSuffix, "wb") as f:
             pickle.dump(s2, f, pickle.HIGHEST_PROTOCOL)
 
-    def purge(s, percentile = 90, span = 100):
-        """ Delete suboptimal devices. The percertile determines how many devices at each current are retained.
+    def purge(s, spanFraction = 500, effThreshold = 0.001):
+        """ Delete suboptimal devices. Only devices with efficiency within 0.1% (effThreshold) of the maximum at each current are retained
         This is useful before recalculate and compare.
         """
         newOrder = np.argsort(s.Is[:, s.bins[-1]]) # Sort all data in order of increasing current
         s.mask(newOrder)
+
+        span = s.Is.shape[0] / spanFraction # Number of data points when finding the maximum efficiency at each current
 
         maxEffs = np.copy(s.effs[:, s.bins[-1]]) # Create new array for storing the efficiency threshold at each current
         # Find efficiency threshold at each current given by percentile of the
         # population given by +/- span datapoints around each current
         # adjust span to be a small fraction of the total number of data points
         for i, eff in enumerate(s.effs[:, s.bins[-1]]):
-            mini = max(0, i - span)
-            maxi = min(s.effs[:, s.bins[-1]].shape[0], i + span)
-            maxEffs[i] = np.percentile(s.effs[mini:maxi, s.bins[-1]], percentile)
-        mask = s.effs[:, s.bins[-1]] > maxEffs
+            mini = max(0, i - int(span / 2))
+            maxi = min(s.effs[:, s.bins[-1]].shape[0], i + int(span / 2))
+            maxEffs[i] = np.max(s.effs[mini:maxi, s.bins[-1]])
+        mask = s.effs[:, s.bins[-1]] > maxEffs - effThreshold
         s.mask(mask)
 
     def recalculate(s):
@@ -934,6 +938,7 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
         # https://maps.nrel.gov
         Ng = np.loadtxt(Dpath + NSRDBfile, skiprows=3, delimiter=',', usecols=tuple(range(159, 310))) # Global Horizontal
         Nd = np.loadtxt(Dpath + NSRDBfile, skiprows=3, delimiter=',', usecols=tuple(range(8, 159))) # Direct spectra
+        Tw = np.loadtxt(Dpath + NSRDBfile, skiprows=3, delimiter=',', usecols=(6, 7)) # Ambient T, wind
         attempts = Nd.shape[0]
         if fname == 'spectra':
             fname = NSRDBfile.replace('.csv', '')
@@ -947,6 +952,7 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
         fullSpectra = fullSpectra[ :, :speCount, : ] # Array to hold the whole set of spectra
         EPR650 = EPR650[ :, :speCount ] # Ivan Garcia's criteria for binning, store EPR value for each spectrum
         P = P[:,:speCount] # Power for each spectrum
+        np.save(fname+'.Tw', Tw)
 
     elif loadFullSpectra: # To reuse a full set of spectra saved earlier
         fullSpectra = np.load(fname+'.full.npy')
@@ -1177,7 +1183,7 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
     spectra[0, 0, -1] = speCount/attempts
     np.save(fname, spectra)
 
-    if True: # Set to True to plot RMS/inertia of each bin/cluster
+    if False: # Set to True to plot RMS/inertia of each bin/cluster
         plt.figure()
         plt.xlabel('Number of spectra')
         plt.ylabel('RMS (W m$^{-2}$ nm$^{-1}$)')
