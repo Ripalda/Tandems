@@ -8,7 +8,7 @@ from __future__ import division
 from __future__ import print_function
 
 __author__ = 'Jose M. Ripalda'
-__version__ = 0.86
+__version__ = 0.87
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -263,8 +263,7 @@ class effs(object):
         """ Interpolate integrated spectra. Wavelength in nm
         Returns integrated photocurrent from given photon energy to UV
         """
-        opticalTrans = np.array([1, s.coe])
-        return opticalTrans[s.d] * np.interp(1e9*hc/energy/q, wavel, s.Iscs[s.d, specIndex, :])
+        return np.interp(1e9*hc/energy/q, wavel, s.Iscs[s.d, specIndex, :])
 
     def getIjx(s, specIndex):
         """ Get cell T and external I in each junction at 1 sun,
@@ -605,7 +604,8 @@ class effs(object):
 
     def kWh(s, efficiency):
         """Converts efficiency values to yearly energy yield in kWh/m2"""
-        return 365.25*24 * s.P[s.d,1] * efficiency * (1 - s.cloudCover) * s.daytimeFraction / 1000
+        opticalTrans = np.array([1, s.coe])
+        return opticalTrans[s.d] * 365.25*24 * s.P[s.d,1] * efficiency * (1 - s.cloudCover) * s.daytimeFraction / 1000
 
     def results(s):
         """ After findGaps() or recalculate(), or load(), this function shows the main results """
