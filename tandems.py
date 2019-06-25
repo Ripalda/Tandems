@@ -8,7 +8,7 @@ from __future__ import division
 from __future__ import print_function
 
 __author__ = 'Jose M. Ripalda'
-__version__ = 0.87
+__version__ = 0.89
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -172,6 +172,12 @@ class effs(object):
     filenameSuffix = '' # Part of automatic filenaming
 
     # ---- Methods and functions ----
+    # s.findGaps() generates random band gap combinations, calls s.useBins() to calculate efficiencies and s.results() for output.
+    # s.useBins() calculate averaged efficiency using spectral bins (or clusters), calls s.stack()
+    # s.stack() get power from 2, 3, or 4 terminal tandem from a single spectrum, calls s.series()
+    # s.series() get power from a single set of series conected junctions, calls s.getIjx()
+    # s.getIjx() get cell T and external photocurrent at each subcell, calls s.intSpec()
+    # s.intSpec() returns integrated photocurrent from given photon energy to UV, uses s.Iscs[] (integrated spectra) set by s.__init__()
 
     def __init__(s, **kwargs):
         """ Call __init__ if you want to change input parameters without discarding
@@ -186,8 +192,11 @@ class effs(object):
             number, i = divmod(number, 62)
             s.autoSuffix = alphabet[i] + s.autoSuffix
 
+		# This sets class attributes from input
         for k, v in kwargs.items():
+            getattr(s, k) # This is here so an error warns you if you mistype an attribute name
             setattr(s, k, v)
+
         if type(s.bins) == int:
             s.bins = [s.bins]
 
@@ -202,6 +211,7 @@ class effs(object):
         s.timePerCluster[0, 0] = 1
         s.timePerCluster[1, 0] = 1
 
+        # If you just want to calculate the efficiency of a single specific band gap combination, things need to be set up a bit differently
         if s.cells == 1:
             s.rgaps = np.array([s.gaps])
             s.auxIs = np.zeros((s.cells, s.junctions))  # Aux array for plotting only
@@ -211,6 +221,7 @@ class effs(object):
             s.Is = np.zeros((s.cells, binMax + 1))
             # Efficiencies as a function of the number of spectral bins,
             s.effs = np.zeros((s.cells, binMax + 1))
+
         s.spectra = np.load(Dpath + s.specsFile) # Load binned or clustered spectra
         # s.daytimeFraction is the fraction of daytime hours in a year and is
         # Needed to calculate the yearly averaged power yield including night time hours.
@@ -235,21 +246,15 @@ class effs(object):
         s.Iscs = np.copy(s.spectra)
         s.P = np.zeros((2, s.spectra.shape[1]))
 
-        def integra(d, specIndex):
-            """ Integrate spectra from UV to given wavelength """
-
-            # Power per unit area ( W / m2 )
-            s.P[d, specIndex] = integrate.trapz(s.spectra[d, specIndex, :],
-                                                   x=wavel)
-            
-            # Current per unit area ( A / m2 ), wavelength in nm
-            s.Iscs[d, specIndex, :] = (q/hc)*np.insert(1e-9*integrate.cumtrapz(
-                    s.EQE*s.spectra[d, specIndex, :]*wavel, x=wavel), 0, 0)
-
+        optical_trans = np.array([1, s.coe])
         # Integrate spectra from UV to given wavelength
         for d in [0, 1]:
-            for i in range(0, s.spectra.shape[1]):
-                integra(d, i)
+            for specIndex in range(0, s.spectra.shape[1]):
+				# Power per unit area ( W / m2 )
+                s.P[d, specIndex] = integrate.trapz(s.spectra[d, specIndex, :], x=wavel)
+				# Current per unit area ( A / m2 ), wavelength in nm
+                s.Iscs[d, specIndex, :] = (q/hc)*np.insert(1e-9*integrate.cumtrapz(
+						optical_trans[d] * s.EQE * s.spectra[d, specIndex, :] * wavel, x=wavel), 0, 0)
 
         if s.topJunctions==0:
             s.topJunctions = s.junctions
@@ -604,8 +609,7 @@ class effs(object):
 
     def kWh(s, efficiency):
         """Converts efficiency values to yearly energy yield in kWh/m2"""
-        opticalTrans = np.array([1, s.coe])
-        return opticalTrans[s.d] * 365.25*24 * s.P[s.d,1] * efficiency * (1 - s.cloudCover) * s.daytimeFraction / 1000
+        return 365.25*24 * s.P[s.d,1] * efficiency * (1 - s.cloudCover) * s.daytimeFraction / 1000
 
     def results(s):
         """ After findGaps() or recalculate(), or load(), this function shows the main results """
@@ -701,10 +705,10 @@ class effs(object):
         plt.tick_params(direction='out', which='minor')
         plt.tick_params(direction='inout', pad=6)
         plt.ylabel('Yearly averaged efficiency (%)')
-        plt.xlabel('Current $\mathregular{(A \ m^{-2})}$')
+        plt.xlabel('Daytime average short circuit current $\mathregular{(mA \ cm^{-2})}$')
         Is_ = np.copy(s.Is[:, s.bins[-1]])
         Is_ = (Is_-Is_.min())/(Is_.max()-Is_.min())
-        plt.scatter( s.Is[:, s.bins[-1]], 100 * s.effs[:, s.bins[-1]], c=Is_,
+        plt.scatter( s.Is[:, s.bins[-1]]/10, 100 * s.effs[:, s.bins[-1]], c=Is_,
                     s = dotSize * 100000 / len(s.effs[:, s.bins[-1]]), edgecolor='none', cmap=LGBT)
         axb = plt.gca().twinx()
         axb.set_ylim(s.kWh(ymin),s.kWh(ymax))
@@ -798,8 +802,8 @@ class effs(object):
             plt.tick_params(direction='inout', pad=6)
             plt.ylabel('Energy yield change (%)')
             percentChange = 100 * (s.kWh(s.auxEffs) - s0.kWh(s0.auxEffs)) / s0.kWh(s0.auxEffs)
-            plt.xlabel('Current $\mathregular{(A \ m^{-2})}$')
-            plt.scatter(s0.auxIs , percentChange , c=Is_ , s=dotSize*20000/len(s.effs[:, s.bins[-1]]) , edgecolor='none', cmap=LGBT)
+            plt.xlabel('Daytime average short circuit current $\mathregular{(mA \ cm^{-2})}$')
+            plt.scatter(s0.auxIs/10 , percentChange , c=Is_ , s=dotSize*20000/len(s.effs[:, s.bins[-1]]) , edgecolor='none', cmap=LGBT)
             plt.savefig(s.name + '-' + s0.name.replace('/', '').replace('.', '') + ' ' +
                         s.specsFile.replace('.npy', '').replace('/', '').replace('.', '_') +
                         '-' + s0.specsFile.replace('.npy', '').replace('/', '').replace('.','_') +
