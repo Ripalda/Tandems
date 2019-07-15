@@ -1167,7 +1167,7 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
                 accubin += P[d, specIndex]
                 for numBins in range(1, binMax):
                     # check if power accumulated is a fraction of total power
-                    if accubin >= ( binIndex[ numBins ] + 1 ) * totalPower[d] / numBins - 0.000000000001:  # This is needed to avoid rounding error
+                    if accubin >= ( binIndex[ numBins ] + 1 ) * totalPower[d] / numBins - 0.0000001:  # This is needed to avoid rounding error
                         binIndex[ numBins ] += 1 # Create new bin if it is
                         binlimits[d][ numBins - 1 ][ binIndex[ numBins ] ] = specIndex + 1 # Store bin limit
                         timePerCluster[ d, getSpectrumIndex( numBins, binIndex[ numBins ] - 1 ) ] = ( specIndex + 1 - binlimits[d][ numBins - 1 ][ binIndex[ numBins ] - 1 ] ) / speCount
