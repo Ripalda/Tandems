@@ -8,7 +8,7 @@ from __future__ import division
 from __future__ import print_function
 
 __author__ = 'Jose M. Ripalda'
-__version__ = 0.89
+__version__ = 0.90
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -902,8 +902,8 @@ def show_assumptions(): # Shows the used EQE model and the AOD and PW statistica
     plt.show()
 
 def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
-        AOD='random', PW='random', tracking='38 -999 -999', smartsDir='',
-        speCount = 20000, NSRDBfile='', fname='spectra', saveFullSpectra = False, loadFullSpectra = False,
+        AOD='random', PW='random', tracking='38 -999 -999', speCount = 20000, 
+        NSRDBfile='', fname='spectra', saveFullSpectra = False, loadFullSpectra = False,
         method='clusters', dissolve = True, killSmall = True, submethod = 'kmeans', numFeatures = 0):
     """ Use file with full yearly set of spectra to generate a few characteristic proxy
     spectra using a clustering method (recommended for more than 10 proxy spectra)
@@ -911,6 +911,9 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
     If no files are provided the spectra are generated usign a slightly modified
     version of SMARTS 2.9.5
     """
+
+    # The SMARTS FOLDER/DIRECTORY SHOULD BE IN THE SAME PLACE AS tandems.py
+    smartsDir='SMARTS/'
 
     def EPR(i, s1):
         """ Calculates EPR, integrates Power and stores spectra"""
@@ -973,7 +976,6 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
         longitude2 = longitude
         AOD2 = AOD
         PW2 = PW
-        #os.chdir('/path to your SMARTS files')
         with open (Dpath + 'smarts295.in_.txt', "r") as fil: # Load template for SMARTS input file
             t0 = fil.readlines()
         t0 = ''.join(t0)
@@ -998,7 +1000,8 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
                 t2 = datetime.fromtimestamp(3155673600.0*np.random.rand()+1517958000.0).strftime("%Y %m %d %H")+' '
                 t2 += '%.2f' % ((latMax-latMin)*np.arccos(2*np.random.rand()-1)/np.pi+latMin)+' '
                 t2 += '%.2f' % (longitude2)+' 0\t\t\t!Card 17a Y M D H Lat Lon Zone\n\n'
-                with open(smartsDir + 'smarts295.inp.txt' , 'w') as fil:
+                print('Path is', os.path.abspath(os.curdir))
+                with open(smartsDir + 'smarts295.inp.txt' , 'w+') as fil:
                     fil.write(t1+t2)
                 try:
                     os.remove(smartsDir + 'smarts295.ext.txt')
@@ -1010,14 +1013,16 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
                     pass
                 attempts += 1
                 # execute SMARTS
-                sub.check_call(smartsDir + './smartsAM4', shell=True)
+                os.chdir(smartsDir)
+                sub.check_call('./smartsAM4', shell=True)
+                os.chdir('../')
                 # check output file
-                tama = os.stat(smartsDir + 'smarts295.ext.txt').st_size
-                if tama>0:
-                    try: # load output file if it exists
+                try: # load output file if it exists
+                    tama = os.stat(smartsDir + 'smarts295.ext.txt').st_size
+                    if tama>0:
                         s1 = np.loadtxt(smartsDir + 'smarts295.ext.txt', delimiter=' ', usecols=(0, 1, 2), unpack=True, skiprows=1)#Global Tilted = 1, Direct Normal= 2, Diffuse Horizontal=3
-                    except:
-                        tama = 0
+                except:
+                    tama = 0
             EPR(specIndex, s1[1:,:]) # Calculates EPR, integrates Power and stores spectra
         print ('Finished generating spectra. Called Smarts '+str(attempts)+' times and got '+str(speCount)+' spectra')
 
@@ -1162,7 +1167,7 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
                 accubin += P[d, specIndex]
                 for numBins in range(1, binMax):
                     # check if power accumulated is a fraction of total power
-                    if accubin >= ( binIndex[ numBins ] + 1 ) * totalPower[d] / numBins:
+                    if accubin >= ( binIndex[ numBins ] + 1 ) * totalPower[d] / numBins - 0.000000000001:  # This is needed to avoid rounding error
                         binIndex[ numBins ] += 1 # Create new bin if it is
                         binlimits[d][ numBins - 1 ][ binIndex[ numBins ] ] = specIndex + 1 # Store bin limit
                         timePerCluster[ d, getSpectrumIndex( numBins, binIndex[ numBins ] - 1 ) ] = ( specIndex + 1 - binlimits[d][ numBins - 1 ][ binIndex[ numBins ] - 1 ] ) / speCount
