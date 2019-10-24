@@ -162,7 +162,7 @@ class effs(object):
     junctions = 6
     topJunctions = 0  # Number of series conected juctions in top stack (topJunctions = 0 in 2 terminal devices)
     concentration = 1000
-    gaps = [0, 0, 0, 0, 0, 0]  # If a gap is 0, it is randomly chosen by tandems.findGaps(), otherwise it is kept fixed at value given here.
+    gaps = [0, 0, 0, 0, 0, 0]  # First is bottom. If a gap is 0, it is randomly chosen by tandems.findGaps(), otherwise it is kept fixed at value given here.
     ERE = 0.01  # External radiative efficiency without mirror. With mirror ERE increases by a factor (1 + beta)
     beta = 11  # n^2 squared refractive index  =  radiative coupling parameter  =  substrate loss.
     bins = 15  # bins is number of spectra used to evaluate eff. See convergence = True.
@@ -664,7 +664,7 @@ class effs(object):
         """ After findGaps() or recalculate(), or load(), this function shows the main results """
         print('Maximum efficiency:', s.auxEffs.max())
         print('Maximum yearly energy yield:', s.kWh(s.auxEffs.max()))
-        print('P sun',365.25*24 * s.P[s.d,1] / 1000, 'cloudCover', s.cloudCover, 'daytimeFraction', s.daytimeFraction)
+        print('P sun',365.25*24 * s.P[s.d,1] * (1 - s.cloudCover) * s.daytimeFraction / 1000, 'cloudCover', s.cloudCover, 'daytimeFraction', s.daytimeFraction)
         imax = np.argmax(s.auxEffs[:, 0])
         print('Optimal gaps:', s.rgaps[imax])
         print('Isc for optimal gaps (A/m2):', s.auxIs[imax, 0])
@@ -999,17 +999,22 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
     # Optionally Load specified National Solar Resource DataBase spectra
     if NSRDBfile != '':
         # https://maps.nrel.gov
-        Ng = np.loadtxt(Dpath + NSRDBfile, skiprows=3, delimiter=',', usecols=tuple(range(159, 310)))  # Global Horizontal
-        Nd = np.loadtxt(Dpath + NSRDBfile, skiprows=3, delimiter=',', usecols=tuple(range(8, 159)))  # Direct spectra
-        Tw = np.loadtxt(Dpath + NSRDBfile, skiprows=3, delimiter=',', usecols=(6, 7))  # Ambient T, wind
+        Ng = np.loadtxt(Dpath + NSRDBfile, skiprows=3, delimiter=',',
+                        usecols=tuple(range(159, 310)))  # Global Horizontal
+        Nd = np.loadtxt(Dpath + NSRDBfile, skiprows=3, delimiter=',',
+                        usecols=tuple(range(8, 159)))  # Direct spectra
+        Tw = np.loadtxt(Dpath + NSRDBfile, skiprows=3, delimiter=',',
+                        usecols=(6, 7))  # Ambient T, wind
         attempts = Nd.shape[0]
         if fname == 'spectra':
             fname = NSRDBfile.replace('.csv', '')
         s1 = np.zeros((2, len(wavel)))
         speCount = 0
         for i in range(0, len(Nd)):
-            s1[0, :] = np.interp(wavel, np.arange(300, 1810, 10), Ng[i, :], left=0, right=0)  # Global Horizontal
-            s1[1, :] = np.interp(wavel, np.arange(300, 1810, 10), Nd[i, :], left=0, right=0)  # Direct spectra
+            s1[0, :] = np.interp(wavel, np.arange(300, 1810, 10), Ng[i, :],
+                                 left=0, right=0)  # Global Horizontal
+            s1[1, :] = np.interp(wavel, np.arange(300, 1810, 10), Nd[i, :],
+                                 left=0, right=0)  # Direct spectra
             speCount = EPR(speCount, s1)  # Calculates EPR, integrates Power and stores spectra
             print(speCount, 'spectra out of', attempts, 'points in time         ', end="\r")
         fullSpectra = fullSpectra[:, :speCount, :]  # Array to hold the whole set of spectra
@@ -1278,5 +1283,5 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
 
 
 def docs():  # Shows HELP file
-    with open('../docs/HELP', 'r') as fin:
+    with open('./HELP', 'r') as fin:
         print(fin.read())
