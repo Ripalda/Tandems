@@ -1,7 +1,6 @@
 # Yearly averaged photovoltaic efficiencies.
-# Tested with Python 2.7 and 3.6
 # SMARTS 2.9.5 and sklearn are required only to generate new sets of spectra.
-# Files with ".npy" extension can be used instead to load a set of spectra.
+# Provided files with ".npy" or ".npz" extension can be used instead to load a set of spectra.
 
 from __future__ import absolute_import
 from __future__ import division
@@ -29,7 +28,7 @@ import scipy.constants as con
 import os
 
 __author__ = 'Jose M. Ripalda'
-__version__ = 0.96
+__version__ = 0.98
 
 print('Tandems version', __version__)
 
@@ -106,7 +105,6 @@ def load_np(filename):  # Convinience wraper on numpy.load
         print('File must be .npy or .npz')
     return loaded_array
 
-
 def Varshni(T):
     """
     Input parameter:
@@ -122,6 +120,118 @@ def Varshni(T):
     semiconductors.  Physica 34, 149 (1967)
     """
     return (T**2)/(T+572)*-8.871e-4+0.091558486
+
+def sandia_T(poa_global, wind_speed, temp_air):
+    """ Sandia solar cell temperature model
+    Adapted from pvlib library to avoid using pandas dataframes
+    parameters used are those of 'open_rack_cell_polymerback'
+    """
+
+    a = -3.56
+    b = -0.075
+    deltaT = 3
+
+    E0 = 1000.  # Reference irradiance
+
+    temp_module = poa_global * np.exp(a + b * wind_speed) + temp_air
+
+    temp_cell = temp_module + (poa_global / E0) * (deltaT)
+
+    return temp_cell
+
+def physicaliam(aoi, n=1.526, K=4., L=0.002):
+    '''
+    Determine the incidence angle modifier using refractive index,
+    extinction coefficient, and glazing thickness.
+
+    Adapted from pvlib library to avoid using pandas dataframes
+
+    physicaliam calculates the incidence angle modifier as described in
+    De Soto et al. "Improvement and validation of a model for
+    photovoltaic array performance", section 3. The calculation is based
+    on a physical model of absorbtion and transmission through a
+    cover.
+
+    Note: The authors of this function believe that eqn. 14 in [1] is
+    incorrect. This function uses the following equation in its place:
+    theta_r = arcsin(1/n * sin(aoi))
+
+    Parameters
+    ----------
+    aoi : numeric
+        The angle of incidence between the module normal vector and the
+        sun-beam vector in degrees. Angles of 0 are replaced with 1e-06
+        to ensure non-nan results. Angles of nan will result in nan.
+
+    n : numeric, default 1.526
+        The effective index of refraction (unitless). Reference [1]
+        indicates that a value of 1.526 is acceptable for glass. n must
+        be a numeric scalar or vector with all values >=0. If n is a
+        vector, it must be the same size as all other input vectors.
+
+    K : numeric, default 4.0
+        The glazing extinction coefficient in units of 1/meters.
+        Reference [1] indicates that a value of  4 is reasonable for
+        "water white" glass. K must be a numeric scalar or vector with
+        all values >=0. If K is a vector, it must be the same size as
+        all other input vectors.
+
+    L : numeric, default 0.002
+        The glazing thickness in units of meters. Reference [1]
+        indicates that 0.002 meters (2 mm) is reasonable for most
+        glass-covered PV panels. L must be a numeric scalar or vector
+        with all values >=0. If L is a vector, it must be the same size
+        as all other input vectors.
+
+    Returns
+    -------
+    iam : numeric
+        The incident angle modifier
+
+    References
+    ----------
+    [1] W. De Soto et al., "Improvement and validation of a model for
+    photovoltaic array performance", Solar Energy, vol 80, pp. 78-88,
+    2006.
+
+    [2] Duffie, John A. & Beckman, William A.. (2006). Solar Engineering
+    of Thermal Processes, third edition. [Books24x7 version] Available
+    from http://common.books24x7.com/toc.aspx?bookid=17160.
+
+    See Also
+    --------
+    getaoi
+    ephemeris
+    spa
+    ashraeiam
+    '''
+    if aoi < 1e-6:
+        iam = 1
+    elif aoi > 89.99:
+        iam = 0
+    else:
+
+        # angle of reflection
+        thetar_deg = np.degrees(np.arcsin(1.0 / n * (np.sin(np.radians(aoi)))))
+
+        # reflectance and transmittance for normal incidence light
+        rho_zero = ((1-n) / (1+n)) ** 2
+        tau_zero = np.exp(-K*L)
+
+        # reflectance for parallel and perpendicular polarized light
+        rho_para = (np.tan(np.radians(thetar_deg - aoi)) /
+                    np.tan(np.radians(thetar_deg + aoi))) ** 2
+        rho_perp = (np.sin(np.radians(thetar_deg - aoi)) /
+                    np.sin(np.radians(thetar_deg + aoi))) ** 2
+
+        # transmittance for non-normal light
+        tau = np.exp(-K*L / np.cos(np.radians(thetar_deg)))
+
+        # iam is ratio of non-normal to normal incidence transmitted light
+        # after deducting the reflected portion of each
+        iam = ((1 - (rho_para + rho_perp) / 2) / (1 - rho_zero) * tau / tau_zero)
+
+    return iam
 
 
 class effs(object):
@@ -166,8 +276,11 @@ class effs(object):
     ERE = 0.01  # External radiative efficiency without mirror. With mirror ERE increases by a factor (1 + beta)
     beta = 11  # n^2 squared refractive index  =  radiative coupling parameter  =  substrate loss.
     bins = 15  # bins is number of spectra used to evaluate eff. See convergence = True.
-    Tmin = 15+273.15  # Minimum cell temperature at zero irradiance in K
-    deltaT = np.array([30, 55])  # Device T increase over Tmin caused by high irradiance (1000 W/m2), first value is for one sun cell, second for high concentration cell
+    #bins = np.arange(1,binMax,1) # This is to test convergence as a function of the number of bins or clusters
+    T_from_spec_file = False  # Use cell temperature data embeded in the spectra
+    expected_eff = 0.3  # Expected yearly averaged efficiency, this is only used to calculate the solar cell temperature if T_from_spec_file = True
+    Tmin = 15+273.15  # Minimum cell temperature at zero irradiance in K. Only used if T_from_spec_file = False
+    deltaT = np.array([30, 55])  # Device T increase over Tmin caused by high irradiance (1000 W/m2), first value is for one sun cell, second for high concentration cell. Only used if T_from_spec_file = False
     convergence = False  # Set to True to test the effect of changing the number of spectral bins used to calculate the yearly average efficiency
     transmission = 0.02  # Subcell thickness cannot be infinite, 3 micron GaAs has transmission in the 2 to 3 % range (depending on integration range)
     thinning = False  # Automatic subcell thinning for current matching
@@ -175,19 +288,22 @@ class effs(object):
     effMin = 0.02  # Lowest sampled efficiency value relative to maximum efficiency. Gaps with lower efficiency are discarded.
     d = 1  # 0 for global spectra, 1 for direct spectra
     # T = 70 for a 1mm2 cell at 1000 suns bonded to copper substrate. Cite I. Garcia et al., in CPV Handbook, ed. by: I. Rey-Stolle, C. Algora
-    name = './Test'  # Can optionally include path to destination of generated files. Example: "/home/documents/test". Some parameters and autoSuffix are appended to filename
+    name = './Test '  # Can optionally include path to destination of generated files. Example: "/home/documents/test". Some parameters and autoSuffix are appended to filename
     cells = 1000  # Target number of calculated tandem cells. Actual number of results will be less.
     R = 5e-7  # Series resistance of each stack in Ohm*m2. Default is optimistic value for high concentration devices
     # R = 4e-5 is suggested as optimistic value for one sun flat plate devices
     EQE = 0.7453*np.exp(-((Energies-1.782)/1.384)**4)+0.1992  # EQE model fitted to current record device, DOI.: 10.1109/JPHOTOV.2015.2501729
     mirrorLoss = 1  # Default value = 1 implies the assumption that back mirror loss = loss due to an air gap.
+    # A group of series connected junctions is here called a stack. Up to two mechanically stacked, optically coupled, but electrically independent "stacks" are considered
     opticallyCoupledStacks = False  # Bottom junction of the top terminal stack can either have photon recycling or radiative coupling to the botttom stack.
     coe = 0.9  # Concentrator optical efficiency. Optimistic default value. Used only for yield calculation.
-    cloudCover = 0.26  # Fraction of the yearly energy that is lost due to clouds. Location dependent, used only for yield calculation. Default value 0.26 is representative of area near Denver, CO.
-    # IMPORTANT set cloudCover = 0 when using experimental spectra. A slightly smaller cloudCover (0.25 vs 0.26) is recommended for global spectra.
-    # If temporal resolution is low, it might be appropriate to set Tmin = Tmin + deltaT to keep T constant.
+    cloudCover = 0 # Fraction of the yearly energy that is lost due to clouds if clear sky spectra are being used.
+    # Used only for yield calculation. A value of 0.26 for direct spectra is representative of area near Denver, CO. and is recommended if clear sky spectra (such as those generated by SMARTS) are being used.
+    # A slightly smaller cloudCover (0.25 vs 0.26) is recommended for global spectra.
+    # IMPORTANT set cloudCover = 0 when using experimental spectra or spectra obtained from a model including the effect of clouds.
     specsFile = 'lat40.clusters.npy'  # Name of the file with the spectral set obtained from tandems.generate_spectral_bins(). See genBins.py
     # File types for spectral sets should either be .clusters.npy or .bins.npy
+
 
     # ---- Results ----
 
@@ -274,16 +390,18 @@ class effs(object):
         s.timePerCluster[0, 0] = 1
         s.timePerCluster[1, 0] = 1
 
-        if False:  # Set to True only for comparison with NSRDB
+        if False:  # Set to True only for comparison with TMYSPEC spectra
             s.spectra[:, :, 1562:] = 0
-            print('s.spectra[:, :, 1562:] = 0 for comparison with NSRDB')
-            print('Spectra are being cut short so efficiencies are comparable with eff from NSRDB spectra')
-        # print('Maximum wavelength is', wavel[int(s.spectra.shape[-1])-1], 'nm')
- 
+            print('s.spectra[:, :, 1562:] = 0')
+            print('Spectra are being cut short so efficiencies are comparable with eff from TMYSPEC spectra')
+            print('Maximum wavelength is', wavel[int(s.spectra.shape[-1])-1], 'nm')
+
         if s.convergence:
-            # bin == binMax is the full set of spectra, bin 1 is the average
-            s.bins = list(range(1,binMax - 1)) + [binMax, binMax - 1]
-            fullSpecs = load_np(Dpath + s.specsFile.replace('.clusters.np', '.full.np').replace('.bins.np', '.full.np'))
+            lastbin = s.bins[-1]
+            s.bins = s.bins[:-1] + [binMax, lastbin]  # bin == binMax is the full set of spectra, bin 1 is the average
+            fullSpecs = load_np(Dpath + s.specsFile.replace('.clusters.np',
+                '.full.np').replace('.bins.np', '.full.np'))
+
             s.spectra = np.concatenate((s.spectra, fullSpecs), axis=1)
             s.spectra[-1, -1, -1] = 0
             # The last element is not needed here.
@@ -291,17 +409,22 @@ class effs(object):
             s.numSpectra[-1] = fullSpecs.shape[1]
             s.Pbins = np.zeros(s.numSpectra[-1])
 
+        s.spectra = np.nan_to_num(s.spectra)
+        s.spectra[s.spectra < 0] = 0  # Negative values and NAN not allowed
+
         s.Iscs = np.copy(s.spectra)
+        s.spectra_copy = np.copy(s.spectra)
         s.P = np.zeros((2, s.spectra.shape[1]))
 
-        # Integrate spectra from UV to given wavelength
+        # Integrate spectra from UV to given wavelength.
         for d in [0, 1]:
             for specIndex in range(0, s.spectra.shape[1]):
+                s.spectra_copy[d, :, :6] = 0  # The first 5 elements are sometimes used to store other data such as temperatures and wind speed
                 # Power per unit area ( W / m2 )
-                s.P[d, specIndex] = integrate.trapz(s.spectra[d, specIndex, :], x=wavel)
+                s.P[d, specIndex] = integrate.trapz(s.spectra_copy[d, specIndex, :], x=wavel)
                 # Current per unit area ( A / m2 ), wavelength in nm
                 s.Iscs[d, specIndex, :] = (q/hc)*np.insert(1e-9*integrate.cumtrapz(
-                        s.EQE * s.spectra[d, specIndex, :] * wavel, x=wavel), 0, 0)
+                        s.EQE * s.spectra_copy[d, specIndex, :] * wavel, x=wavel), 0, 0)
 
         if s.topJunctions == 0:
             s.topJunctions = s.junctions
@@ -309,13 +432,27 @@ class effs(object):
             s.d = 1  # use direct spectra
         else:
             s.d = 0  # use global spectra
+
         s.filenameSuffix = str(int(s.junctions))+' '+str(int(s.topJunctions))+' '+str(int(s.concentration))+' '+s.autoSuffix
+
+        for i, bin in enumerate(s.bins):
+            if bin < 0:  # This is used to calculate the efficiency with the standard spectrum but with the actual irradiance
+                 s.bins[i] = -1 * s.bins[i]
+                 for binIndex in range(s.numSpectra[s.bins[i]]-1, -1, -1):
+                    spec_index =  getSpectrumIndex(s.bins[i], binIndex)
+                    s.Iscs[0, spec_index, :] = s.Iscs[0, 0, :] * s.P[0, spec_index] / s.P[0, 0] # Only implemented for global spectrum TODO: perhaps change the whole code to hold a single set of spectra, either direct or global
 
     def intSpec(s, energy, specIndex):
         """ Interpolate integrated spectra. Wavelength in nm
         Returns integrated photocurrent from given photon energy to UV
         """
         return np.interp(1e9*hc/energy/q, wavel, s.Iscs[s.d, specIndex, :])
+
+    def heat_eff(s, R=0.05, eff0=0.165):
+        """Irradiance modifier to account for the fact that the Sandia cell
+        temperature model does not include the effect of efficiency
+        """
+        return (1 - R - s.expected_eff) / (1 - R - eff0)
 
     def getIjx(s, specIndex):
         """ Get cell T and external I in each junction at 1 sun,
@@ -324,8 +461,21 @@ class effs(object):
         Ijx = np.zeros(s.junctions)  # Array with the external photocurrents
         IfromTop = 0
         upperIntSpec = 0
-        # To a first approximation, cell T is a linear function of irradiance.
-        s.T = s.Tmin + s.deltaT[s.d] * s.P[s.d, specIndex] / 1000
+
+        if s.T_from_spec_file:  # Find solar cell temperature
+            amb_T = s.spectra[s.d, specIndex, 1] * 1e6
+            wind = s.spectra[s.d, specIndex, 2] * 1e6
+            #cell_T = s.spectra[s.d, specIndex, 3] * 1e1
+            irradiance = s.P[s.d, specIndex]
+            aoi = s.spectra[s.d, specIndex, 5] * 1e6
+            aim = physicaliam(aoi)
+            s.T = sandia_T(s.heat_eff() * aim * irradiance, wind, amb_T) + 273.15
+            #print('aoi, amb_T, cell_T, irradiance, wind, s.T',aoi, amb_T, cell_T, irradiance, wind, s.T, end="\r")
+            #print('gaps '+str(s.gaps)+' s.T[0] '+str(s.T[0]), end="\r")
+        else:
+            # To a first approximation, cell T is a linear function of irradiance.
+            s.T = s.Tmin + s.deltaT[s.d] * s.P[s.d, specIndex] / 1000
+
         # From top to bottom: get external photocurrent in each junction
         for i in range(s.junctions-1, -1, -1):
             # IntSpec = Integrated current from UV to given Energy gap
@@ -399,8 +549,8 @@ class effs(object):
                         donorSubcell = aceptorSubcell
                     donorSubcell -= 1 # Go down
 
-            if bottomJts > 0:  # if there is a lower series device in stack
-                # The excess current from the bottom junction of the top series, goes to lower series
+            if bottomJts > 0:  # if there is a lower series_connected device in stack
+                # The excess current from the bottom junction of the top series_connected, goes to lower series_connected
                 exIb = Ijx[bottomJts] - Ijx[bottomJts:].min()
                 Ijx[bottomJts] -= exIb
                 Ijx[bottomJts-1] += exIb
@@ -438,12 +588,18 @@ class effs(object):
         k0 = 2 * np.pi * q * kT**3 / (con.h * hc**2)
         Irc0 = s.Irc  # radiative coupling from upper stack
 
-        if Ijx.min() <= 0:
-            pdb.set_trace()
+        if Ijx.sum() == 0:
+            return
+
+        # if Ijx.min() <= 0:
+            # pdb.set_trace()
         # Initial guess for current at the maximum power point
         Imax = Ijx[bottomJ:topJ + 1].min()
         Imaxs = [0, Imax]
         # Loop to self consistently refine max power point
+        Ijmin = 0
+        I_sample = np.array([0])
+        V = 0
         while (((Imax-Imaxs[-2]) / Imax)**2) > 1e-7:
             V = 0
             s.Irc = Irc0  # Radiative coupling from upper stack
@@ -470,11 +626,11 @@ class effs(object):
                 # Recombination current at V = 0 in A / m2 s
                 I0 = (1 + backLoss) * k0 * np.exp(-1 * g0) * ((g0 + 1)**2 + 1) / s.ERE
                 # add voltage of series connected cells
-                V += (kT/q)*np.log((Ij[i]-I_sample)/I0+1)
+                V += (kT / q) * np.log((Ij[i] - I_sample)/I0 + 1)
             V -= s.R*I_sample # V drop due to series resistance
-            Imax = I_sample[np.argmax(I_sample*V)]  # I at max power point
+            Imax = I_sample[np.argmax(I_sample * V)]  # I at max power point
             # The following can be used to monitor IV curve parameters
-            # print(Imax, V[np.argmax(I_sample*V)], I_sample[0], I_sample[-1], V[0], V[-1], (kT/q)*np.log((Ij[i])/I0+1))
+            # print(Imax, V[np.argmax(I_sample * V)], I_sample[0], I_sample[-1], V[0], V[-1], (kT / q) * np.log((Ij[i]) / I0 + 1))
             Imaxs.append(Imax)
         if len(Imaxs) > 10:
             print('self consistency is slowing convergence while finding the maximum power point.')
@@ -484,7 +640,7 @@ class effs(object):
         # Yearly daytime average photocurrent per unit cell area
         s.Itotal += Ijmin * s.timePerSpectra(numBins, binIndex)
         # Yearly daytime average power per unit module area
-        s.Pout += (I_sample*V).max() * s.timePerSpectra(numBins, binIndex) / concentration
+        s.Pout += (I_sample * V).max() * s.timePerSpectra(numBins, binIndex) / concentration
 
     # A stack is composed of one monolythic two terminal device or two of them mechanically stacked
     def stack(s, numBins, binIndex):
@@ -503,7 +659,7 @@ class effs(object):
 
     def useBins(s, bins, results):
         """Use spectral bins and s.gaps to calculate yearly energy yield and eff.
-        Optionally discard bad results.
+        Optionally discard bad band gap combinations (results).
         """
         for numBins in bins:
             Pin = 0
@@ -514,7 +670,7 @@ class effs(object):
                 # Get power in/out for each spectra and add to Pin and Pout
                 s.stack(numBins, binIndex)
                 # Yearly averaged daytime power in from the sun
-                Pin += s.P[s.d, getSpectrumIndex(numBins, binIndex)]* s.timePerSpectra(numBins, binIndex)
+                Pin += s.P[s.d, getSpectrumIndex(numBins, binIndex)] * s.timePerSpectra(numBins, binIndex)
             eff = s.Pout / Pin
             s.effs[results, numBins] = eff
             s.Is[results, numBins] = s.Itotal
@@ -590,8 +746,8 @@ class effs(object):
         s.rgaps = np.zeros((s.cells, s.junctions))  # Gaps
         s.auxIs = np.zeros((s.cells, s.junctions))  # Aux array for plotting only
         s.auxEffs = np.zeros((s.cells, s.junctions))  # Aux array for plotting only
-        s.Is = np.zeros((s.cells, binMax + 1))  # Currents as a function of the number of spectral bins, 0 is standard spectrum, 10 is full spectral dataset
-        s.effs = np.zeros((s.cells, binMax + 1))  # Efficiencies as a function of the number of spectral bins, 0 is standard spectrum, 10 is full spectral dataset
+        s.Is = np.zeros((s.cells, binMax + 1))  # Currents as a function of the number of spectral bins, 0 is standard spectrum, binMax is full spectral dataset
+        s.effs = np.zeros((s.cells, binMax + 1))  # Efficiencies as a function of the number of spectral bins, 0 is standard spectrum, binMax is full spectral dataset
         fixedGaps = np.copy(s.gaps)  # Copy input gaps to remember which ones are fixed, if gap==0 make it random
 
         while (results<s.cells):  # Loop to randomly sample a large number of gap combinations
@@ -624,8 +780,8 @@ class effs(object):
             if s.thinning:
                 s.thin()
 
-            s.useBins([2], results)
-            eff = s.effs[results, 2]  # get rough estimate of efficiency
+            s.useBins([1], results)
+            eff = s.effs[results, 1]  # get rough estimate of efficiency
 
             if (eff > effmax - s.effMin - 0.01):  # If gap combination is good, do more work on it
                 for gi, gap in enumerate(s.gaps):  # Expand edges of search space if any of the found gaps are near an edge
@@ -643,7 +799,7 @@ class effs(object):
                 if (eff>effmax):
                     effmax = eff
                 results = s.useBins(s.bins, results)  # Calculate efficiency for s.gaps, store result if gaps are good
-                if results % 10 == 0:  # Show calculation progress from time to time
+                if results % 2 == 0:  # Show calculation progress from time to time
                     print('Tried '+str(ncells)+', got '+str(results)+' candidate gap combinations.           ', end="\r")
             ncells += 1
 
@@ -658,13 +814,13 @@ class effs(object):
 
     def kWh(s, efficiency):
         """Converts efficiency values to yearly energy yield in kWh/m2"""
-        return 365.25*24 * s.P[s.d,1] * efficiency * (1 - s.cloudCover) * s.daytimeFraction / 1000
+        return 365.25*24 * s.P[s.d, 1] * efficiency * (1 - s.cloudCover) * s.daytimeFraction / 1000
 
     def results(s):
         """ After findGaps() or recalculate(), or load(), this function shows the main results """
         print('Maximum efficiency:', s.auxEffs.max())
         print('Maximum yearly energy yield:', s.kWh(s.auxEffs.max()))
-        print('P sun',365.25*24 * s.P[s.d,1] * (1 - s.cloudCover) * s.daytimeFraction / 1000, 'cloudCover', s.cloudCover, 'daytimeFraction', s.daytimeFraction)
+        print('P sun',365.25*24 * s.P[s.d, 1] * (1 - s.cloudCover) * s.daytimeFraction / 1000, 'cloudCover', s.cloudCover, 'daytimeFraction', s.daytimeFraction)
         imax = np.argmax(s.auxEffs[:, 0])
         print('Optimal gaps:', s.rgaps[imax])
         print('Isc for optimal gaps (A/m2):', s.auxIs[imax, 0])
@@ -676,7 +832,8 @@ class effs(object):
         Is_ = np.copy(s.auxIs)
         Is_ = (Is_-Is_.min())/(Is_.max()-Is_.min())
         if s.convergence:
-            ec = 100*(s.effs[:, 1:-1] - s.effs[:, -1][:, None])
+            ec = 100*(s.effs[:, 1:-1][:, np.delete(s.bins, -2) - 1] - s.effs[:, -1][:, None])
+            print(s.bins)
             ecm = np.median(ec, axis=0)
             emax = np.ndarray.max(ec, axis=0)
             emin = np.ndarray.min(ec, axis=0)
@@ -685,36 +842,37 @@ class effs(object):
             print('Median and maximum error',ecm[-1], emax[-1])
             plt.figure()
             plt.xlabel('Number of spectra')
-            plt.ylabel('Yearly efficiency overestimate (%)')
+            plt.ylabel('Yearly efficiency error (%)')
             plt.xlim(0.3, binMax - 0.3)
-            #plt.ylim(0, 1.05*(100 * (s.effs[: , 1] - s.effs[: , -1])).max())
-            plt.ylim(0.02, 4)
+            plt.ylim(0, 1.05*(100 * (s.effs[: , 1] - s.effs[: , -1])).max())
+            #plt.ylim(0.02, 4)
             plt.tick_params(axis='y', right='on')
             ax = plt.gca()
-            ax.set_yscale('log')
+            #ax.set_yscale('log')
             ax.xaxis.set_major_locator(plt.MultipleLocator(2))
+            #plt.plot([-1, 32], [0, 0], linestyle=':', color='black')
             for i in range(0, int(res)):
-                plt.scatter(range(1, binMax), ec[i,:], color = np.array([0,0,0,1]), s=100, marker='_', linewidth=0.3)
-            plt.savefig(s.name+' ' + s.specsFile.replace('.npy', '').replace('.','-') + ' convergence ' + s.filenameSuffix, dpi=300, bbox_inches="tight")
-            plt.savefig(s.name+' ' + s.specsFile.replace('.npy', '').replace('.','-') + ' convergence ' + s.filenameSuffix + '.svg', bbox_inches="tight")
+                plt.scatter(np.delete(s.bins, -2), ec[i, :], color = np.array([0,0,0,1]), s=100, marker='_', linewidth=0.3)
+            plt.savefig(s.name + s.specsFile.replace('.npy', '').replace('.','-') + ' convergence ' + s.filenameSuffix, dpi=300, bbox_inches="tight")
+            plt.savefig(s.name + s.specsFile.replace('.npy', '').replace('.','-') + ' convergence ' + s.filenameSuffix + '.svg', bbox_inches="tight")
             if show:
                 plt.show()
 
-            if True: # Set to True to plot quartiles
+            if False: # Set to True to plot quartiles
                 plt.figure()
                 plt.xlabel('Number of spectra')
                 plt.ylabel('Yearly efficiency overestimate (%)')
                 plt.xlim(1, binMax - 1)
                 plt.ylim(0.02, 4)
                 ax = plt.gca()
-                plt.grid(which='y')
+                #plt.grid(which='major')
                 ax.set_yscale('log')
                 ax.xaxis.set_major_locator(plt.MultipleLocator(2))
                 plt.tick_params(axis='y', right='on')
-                plt.plot(range(1, binMax), ecm, color = '#0077BB')
-                plt.fill_between(range(1, binMax), eq1 , eq3, facecolor=np.array([0, 0.6, 0.8, 0.32]))
-                plt.fill_between(range(1, binMax), emin , emax, facecolor=np.array([0, 0.6, 0.8, 0.32]))
-                plt.savefig(s.name+' ' + s.specsFile.replace('.npy', '').replace('.','-') +
+                plt.plot(s.bins, ecm, color = '#0077BB')
+                plt.fill_between(s.bins, eq1 , eq3, facecolor=np.array([0, 0.6, 0.8, 0.32]))
+                plt.fill_between(s.bins, emin , emax, facecolor=np.array([0, 0.6, 0.8, 0.32]))
+                plt.savefig(s.name + s.specsFile.replace('.npy', '').replace('.','-') +
                             ' convergence_ ' + s.filenameSuffix, dpi=300, bbox_inches="tight")
                 if show:
                     plt.show()
@@ -745,7 +903,7 @@ class effs(object):
         axb = plt.gca().twinx()
         axb.set_ylim(s.kWh(ymin),s.kWh(ymax))
         axb.set_ylabel('Yield $\mathregular{(kWh \ m^{-2} \ year^{-1})}$')
-        plt.savefig(s.name+' ' + s.specsFile.replace('.npy', '').replace('.','-') +
+        plt.savefig(s.name + s.specsFile.replace('.npy', '').replace('.','-') +
                     ' ' + s.filenameSuffix, dpi=300, bbox_inches="tight")
 
         plt.figure()
@@ -762,8 +920,8 @@ class effs(object):
         axb = plt.gca().twinx()
         axb.set_ylim(s.kWh(ymin),s.kWh(ymax))
         axb.set_ylabel('Yield $\mathregular{(kWh \ m^{-2} \ year^{-1})}$')
-        plt.savefig(s.name + ' I ' + s.specsFile.replace('.npy', '').replace('.','-') +
-                    ' ' + s.filenameSuffix, dpi=300, bbox_inches="tight")
+        plt.savefig(s.name + s.specsFile.replace('.npy', '').replace('.','-') +
+                    ' I ' + s.filenameSuffix, dpi=300, bbox_inches="tight")
 
         if show:
             plt.show()
@@ -773,8 +931,8 @@ class effs(object):
             plt.xlabel('Yearly averaged efficiency (%)')
             plt.ylabel('Count')
             plt.hist(100*s.effs[:, s.bins[-1]], bins=30)
-            plt.savefig(s.name + ' Hist ' + s.specsFile.replace('.npy', '').replace('.', '-') +
-                        ' ' + s.filenameSuffix, dpi=300, bbox_inches="tight")
+            plt.savefig(s.name + s.specsFile.replace('.npy', '').replace('.', '-') +
+                        ' Hist ' + s.filenameSuffix, dpi=300, bbox_inches="tight")
         if show:
             plt.show()
 
@@ -785,7 +943,7 @@ class effs(object):
             s2 = deepcopy(s)
             s2.spectra = 0
             s2.Iscs = 0
-        with open(s.name+' '+s.specsFile.replace('.npy', '')+' '+s.filenameSuffix, "wb") as f:
+        with open(s.name + s.specsFile.replace('.npy', '')+' '+s.filenameSuffix, "wb") as f:
             pickle.dump(s2, f, pickle.HIGHEST_PROTOCOL)
 
     def purge(s, spanFraction=500, effThreshold=0.001):
@@ -829,18 +987,18 @@ class effs(object):
             ejes = plt.gca()
             ejes.xaxis.set_major_locator(plt.MultipleLocator(2))
             plt.tick_params(axis='y', right='on')
-            ec = 100*(s.effs[:, 1:-1] - s.effs[:, -1][:, None])
+            ec = 100*(s.effs[:, 1:-1] - s.effs[:, -1][:, None]) # IN CASE OF ERROR: ec = ec[:, np.delete(s.bins, -2)] might be needed after this
             ecm = np.mean(ec, axis=0)
             ece = np.sqrt(np.sum((ec - ecm)**2, axis=0) / (ec.shape[0] - 1))
             plt.ylim(0, 1.05*(ecm + ece)[1])
-            plt.scatter(range(1, binMax), ecm + ece, marker='v', s=80, c=b2)
-            plt.scatter(range(1, binMax), ecm, marker='_', s=80, c=b1)  # color = LGBT(auxIs[i*s.junctions])
+            plt.scatter(s.bins, ecm + ece, marker='v', s=80, c=b2)
+            plt.scatter(s.bins, ecm, marker='_', s=80, c=b1)  # color = LGBT(auxIs[i*s.junctions])
             ec = 100*(s0.effs[: , 1:-1] - s0.effs[: , -1][:, None])
             ecm = np.mean(ec, axis=0)
             ece = np.sqrt (np.sum((ec - ecm)**2, axis = 0) / (ec.shape[0] - 1))
-            plt.scatter(range(1, binMax), ecm + ece, marker='v', s=80, c=r2)
-            plt.scatter(range(1, binMax), ecm, marker='_', s=80, c=r1)  # color = LGBT(auxIs[i*s.junctions])
-            plt.savefig(s.name+' ' + s.specsFile.replace('.npy', '').replace('.', '-') +
+            plt.scatter(s.bins, ecm + ece, marker='v', s=80, c=r2)
+            plt.scatter(s.bins, ecm, marker='_', s=80, c=r1)  # color = LGBT(auxIs[i*s.junctions])
+            plt.savefig(s.name + s.specsFile.replace('.npy', '').replace('.', '-') +
                         ' convergence compare ' + s.filenameSuffix, dpi=300, bbox_inches="tight")
             if show:
                 plt.show()
@@ -941,7 +1099,7 @@ def show_assumptions():  # Shows the used EQE model and the AOD and PW statistic
 
     # PW random distribution used here is fitted to histograms by Jaus and Gueymard based on Aeronet data
     lrnd = 0.39*np.random.chisquare(4.36, size=1000000)
-    lrnd[lrnd > 7] = 7  # For plotting purposes, PW values are capped here at AOD=2, this is not done during calculations
+    lrnd[lrnd > 7] = 7
     plt.figure()
     titel = 'PW random distribution used here is fitted to \n histograms by Jaus and Gueymard based on Aeronet data, \n'
     titel += 'DOI: 10.1063/1.4753849 \n In Jaus and Gueymard, percentiles at 25% and 75% are 0.85, 2.27. \n'
@@ -955,10 +1113,12 @@ def show_assumptions():  # Shows the used EQE model and the AOD and PW statistic
 
 def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
                            AOD='random', PW='random', tracking='38 -999 -999',
-                           speCount=20000, NSRDBfile='', fname='spectra',
+                           speCount=365*24, NSRDBfile='', fname='spectra',
                            saveFullSpectra=False, loadFullSpectra=False,
                            method='clusters', dissolve=True,
-                           killSmall=True, submethod='kmeans', numFeatures=0):
+                           killSmall=True, submethod='kmeans', numFeatures=0,
+                           bins=np.arange(1,binMax,1),
+                           glo_dir=[0,1]):
     """ Use file with full yearly set of spectra to generate a few characteristic proxy
     spectra using a clustering method (recommended for more than 10 proxy spectra)
     or a binning method (recommended for less than 6 proxy spectra).
@@ -971,11 +1131,11 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
 
     def EPR(i, s1):
         """ Calculates EPR, integrates Power and stores spectra"""
-        P[:, i] = integrate.trapz(s1, x=wavel, axis=1)
-        if (P[0, i] > 0) and (P[1, i] > 0):
+        P[:, i] = integrate.trapz(s1[:, 7:], x=wavel[7:], axis=1) # the first few elements of the spectra are used to store temps and winds
+        if (P[0, i] > 0):
             fullSpectra[:, i, :] = s1
             # Calculate EPR, Ivan Garcia's criteria for binning
-            EPR650[:, i] = integrate.trapz(s1[:, :490], x=wavel[:490], axis=1)
+            EPR650[:, i] = integrate.trapz(s1[:, 7:490], x=wavel[7:490], axis=1)
             EPR650[:, i] = (P[:, i] - EPR650[:, i]) / EPR650[:, i]
             i += 1  # Spectrum index is incremented if spectrum is not zero
         return i
@@ -1023,9 +1183,9 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
         np.save(fname+'.Tw', Tw)
 
     elif loadFullSpectra:  # To reuse a full set of spectra saved earlier
-        fullSpectra_loaded = np.load(fname+'.full.npy')
-        EPR650 = np.zeros((2, fullSpectra_loaded .shape[1]))  # Ivan Garcia's criteria for binning, store EPR value for each spectrum
-        P = np.zeros((2, fullSpectra_loaded .shape[1]))  # Power for each spectrum
+        fullSpectra_loaded = load_np(fname+'.full.npz')
+        EPR650 = np.zeros((2, fullSpectra_loaded.shape[1]))  # Ivan Garcia's criteria for binning, store EPR value for each spectrum
+        P = np.zeros((2, fullSpectra_loaded.shape[1]))  # Power for each spectrum
         attempts = fullSpectra_loaded [-1, -1, -1]
 
         speCount = 0
@@ -1037,6 +1197,7 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
         fullSpectra[-1, -1, -1] = 0
 
     else:  # Generate SMARTS spectra if no file with spectra is provided
+        print('Path is', os.path.abspath(os.curdir))
         longitude2 = longitude
         AOD2 = AOD
         PW2 = PW
@@ -1064,7 +1225,6 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
                 t2 = datetime.fromtimestamp(3155673600.0*np.random.rand()+1517958000.0).strftime("%Y %m %d %H")+' '
                 t2 += '%.2f' % ((latMax-latMin)*np.arccos(2*np.random.rand()-1)/np.pi+latMin)+' '
                 t2 += '%.2f' % (longitude2)+' 0\t\t\t!Card 17a Y M D H Lat Lon Zone\n\n'
-                print('Path is', os.path.abspath(os.curdir))
                 with open(smartsDir + 'smarts295.inp.txt', 'w+') as fil:
                     fil.write(t1+t2)
                 try:
@@ -1093,7 +1253,7 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
 
     if saveFullSpectra:
         fullSpectra[-1, -1, -1] = attempts
-        np.save(fname+'.full', fullSpectra)
+        np.savez_compressed(fname+'.full', fullSpectra)
 
     totalPower = np.zeros(2)
     RMS = np.zeros((2, binMax - 1))
@@ -1103,7 +1263,7 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
 
     if method == 'clusters':  # Use machine learning clustering methods
 
-        for d in (0, 1):  # d = 1 for direct spectra
+        for d in glo_dir:  # d = 1 for direct spectra
             specFeat = np.copy(fullSpectra)
             if numFeatures != 0:
                 # Set numFeatures = 50 to speed up the clustering or 0 to skip this optional step
@@ -1124,7 +1284,7 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
                 features = FeatureAgglomeration(n_clusters=numFeatures,
                                                 connectivity=conn
                                                 ).fit(fullSpectra[d, :, :])
-                
+
                 for fea in range(numFeatures):
                     # Boolean array labeling points belonging in each feature
                     mask = features.labels_ == fea
@@ -1134,9 +1294,9 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
             specFeat[d, :, :] = normalize(specFeat[d, :, :])
 
             # Now merge simillar spectra
-            specIndex = 1
 
-            for clustersCount in range(1, binMax):  # clustersCount is number of clusters
+            for clustersCount in bins:  # bins is number of clusters
+                specIndex = getSpectrumIndex(clustersCount, 0)
                 # use extra clusters and then disolve smaller clusters
                 extraClusters = int(clustersCount/2)
                 if not killSmall or submethod != 'kmeans':
@@ -1205,23 +1365,23 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
 
                 inertia = np.zeros(fullSpectra.shape[-1])
                 for binIndex in range(0, clustersCount):
-                    espectros = fullSpectra[d, clusters.labels_ == binIndex, :]
+                    espectros = fullSpectra[d, clusters.labels_ == binIndex, :] # To calculate the average spectra representative of each cluster, dont use the normalized specFeat spectra
                     center = espectros.mean(axis=0)  # Find average of spectra in cluster
                     inertia += ((espectros - center)**2).sum(axis=0)  # This is used to have diagnostics of the RMS error in the spectra classification
                     spectra[d, specIndex+binIndex, :] = center
+                #print('spectra[0, :, :6].mean(axis=0)', spectra[0, :, :6].mean(axis=0))
                 inertia = integrate.trapz(inertia, x=wavel)/(wavel[-1] - wavel[0])
                 RMS[d, clustersCount-1] = np.sqrt(inertia / fullSpectra.shape[1])
                 timePerCluster[d, specIndex:(specIndex+clustersCount)] = spectraPerCluster / speCount
-                specIndex += clustersCount
                 print('Number of clusters:', clustersCount, '   ', end="\r")
 
-        np.save(fname+'.timePerCluster', timePerCluster)
+        np.savez_compressed(fname+'.timePerCluster', timePerCluster)
         fname += '.clusters'
 
     else:  # If not using machine learning clusters,
         # use Garcia's binning method based on the EPR650 criteria,
         # DOI: 10.1002/pip.2943
-        for d in (0, 1):  # d = 1 for direct spectra
+        for d in glo_dir:  # d = 1 for direct spectra
             # Sort spectra and integrated powers by EPR
             fullSpectra[d, :, :] = fullSpectra[d, np.argsort(EPR650[d, :]), :]
             P[d, :] = P[d, np.argsort(EPR650[d, :])]
@@ -1230,22 +1390,24 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
             binIndex = np.zeros(binMax, dtype=np.int)
             # Prepare data structure to store bin limits and averaged spectra.
             # numBins is total number of bins
-            for numBins in range(1, binMax):
+            for numBins in bins:
                 binlimits[d].append(np.zeros(numBins+1, dtype=np.int))
             accubin = 0
             # Calculate bin limits with equal power in each bin
             for specIndex in range(0, speCount):
                 # Accumulate power and check if its a fraction of total power
                 accubin += P[d, specIndex]
-                for numBins in range(1, binMax):
+                for numBins in bins:
                     # check if power accumulated is a fraction of total power
                     if accubin >= (binIndex[numBins] + 1) * totalPower[d] / numBins - 0.0000001:  # This is needed to avoid rounding error
                         binIndex[numBins] += 1  # Create new bin if it is
                         binlimits[d][numBins - 1][binIndex[numBins]] = specIndex + 1  # Store bin limit
                         timePerCluster[d, getSpectrumIndex(numBins, binIndex[numBins] - 1)] = (specIndex + 1 - binlimits[d][numBins - 1][binIndex[numBins] - 1]) / speCount
             # Average spectra using the previously calculated bin limits
-            specIndex = 1
-            for numBins in range(1, binMax):  # iterate over every bin set
+
+            for numBins in bins:  # iterate over every bin set
+                specIndex = getSpectrumIndex(clustersCount, 0)
+
                 inertia = np.zeros(fullSpectra.shape[-1])
                 binlimits[d][numBins-1][-1] = speCount  # set the last bin limit to the total number of spectra
                 for binIndex in range(0, numBins):
@@ -1257,12 +1419,13 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
                 inertia = integrate.trapz(inertia, x=wavel)/(wavel[-1] - wavel[0])
                 RMS[d, numBins-1] = np.sqrt(inertia / fullSpectra.shape[1])
 
-        np.save(fname+'.timePerBin', timePerCluster)
+        np.savez_compressed(fname+'.timePerBin', timePerCluster)
         fname += '.bins'
 
-    # speCount/attempts is needed to calculate the yearly averaged power yield including night time hours.
+    # speCount/attempts is the fraction of daytime hours in a year. It is needed to calculate the yearly averaged power yield including night time hours.
     spectra[0, 0, -1] = speCount/attempts
-    np.save(fname, spectra)
+    print('Yearly daytime fraction is', speCount/attempts)
+    np.savez_compressed(fname, spectra)
 
     if False:  # Set to True to plot RMS/inertia of each bin/cluster
         plt.figure()
@@ -1274,9 +1437,9 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
         ejes.xaxis.set_major_locator(plt.MultipleLocator(2))
         plt.tick_params(axis='y', right='on')
         if method == 'clusters':
-            plt.scatter(range(1, binMax), RMS[1], c='none', edgecolor='#0077BB', label='Clustering')  # Plot RMS for each cluster / bin for direct normal + circumsolar spectra
+            plt.scatter(bins, RMS[1], c='none', edgecolor='#0077BB', label='Clustering')  # Plot RMS for each cluster / bin for direct normal + circumsolar spectra
         else:
-            plt.scatter(range(1, binMax), RMS[1], c='#FF00FF', edgecolor='none', label='Binning')  # Plot RMS for each cluster / bin for direct normal + circumsolar spectra
+            plt.scatter(bins, RMS[1], c='#FF00FF', edgecolor='none', label='Binning')  # Plot RMS for each cluster / bin for direct normal + circumsolar spectra
         plt.legend(frameon=False)
         plt.savefig('RMS' + str(int(10*time.time())), dpi=300, bbox_inches="tight")
         plt.savefig('RMS' + str(int(10*time.time())) + '.svg', bbox_inches="tight")
