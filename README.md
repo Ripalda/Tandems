@@ -19,6 +19,8 @@ SMARTS 2.9.5 is required only to generate a new set of random spectra.
 
 File "data/lat40.npy" can be used instead of SMARTS to load a set of averaged spectra.
 
+Clone or download from https://github.com/Ripalda/Tandems to obtain full set of spectra (about 600 MB).
+
 Project Organization
 --------------------
 
