@@ -1,6 +1,7 @@
 # Yearly averaged photovoltaic efficiencies.
 # SMARTS 2.9.5 and sklearn are required only to generate new sets of spectra.
 # Provided files with ".npy" or ".npz" extension can be used instead to load a set of spectra.
+# Clone or download from https://github.com/Ripalda/Tandems to obtain full set of spectra (about 600 MB).
 
 from __future__ import absolute_import
 from __future__ import division
@@ -13,7 +14,6 @@ import time
 import pdb
 import pickle
 from copy import deepcopy
-import subprocess as sub
 from datetime import datetime
 from glob import glob
 from sklearn.cluster import FeatureAgglomeration
@@ -28,7 +28,7 @@ import scipy.constants as con
 import os
 
 __author__ = 'Jose M. Ripalda'
-__version__ = 0.98
+__version__ = 0.989
 
 print('Tandems version', __version__)
 
@@ -578,7 +578,7 @@ class effs(object):
         # Do "tandems.show_assumptions()" to see models for EQE, AOD, and PW
 
         if (topJ < 0):
-            return
+            return np.array([0]), np.array([0])
         Ijx = concentration * s.getIjx(getSpectrumIndex(numBins, binIndex)) * s.thinTrans
         # thinTrans is set by thin()
         # s.T is set by s.getIjx
@@ -589,7 +589,7 @@ class effs(object):
         Irc0 = s.Irc  # radiative coupling from upper stack
 
         if Ijx.sum() == 0:
-            return
+            return np.array([0]), np.array([0])
 
         # if Ijx.min() <= 0:
             # pdb.set_trace()
@@ -641,6 +641,7 @@ class effs(object):
         s.Itotal += Ijmin * s.timePerSpectra(numBins, binIndex)
         # Yearly daytime average power per unit module area
         s.Pout += (I_sample * V).max() * s.timePerSpectra(numBins, binIndex) / concentration
+        return I_sample, V
 
     # A stack is composed of one monolythic two terminal device or two of them mechanically stacked
     def stack(s, numBins, binIndex):
@@ -649,13 +650,13 @@ class effs(object):
         s.Irc = 0  # For top cell there is no radiative coupling from upper cell
         pout = s.Pout
         # For top stack, calculate power out for each spectra and add to Pout. topJunctions is number of juntions in top stack
-        s.series(s.junctions-1, s.junctions-s.topJunctions, numBins, binIndex, s.concentration)
+        I, V = s.series(s.junctions-1, s.junctions-s.topJunctions, numBins, binIndex, s.concentration)
         if not s.opticallyCoupledStacks:
             s.Irc = 0
         # For bottom stack, calculate power out for each spectra and add to Pout.
-        s.series(s.junctions-s.topJunctions-1, 0, numBins, binIndex, s.concentration)
+        I2, V2 = s.series(s.junctions-s.topJunctions-1, 0, numBins, binIndex, s.concentration)
         s.Pbins[binIndex] = s.Pout - pout
-        return
+        return I + I2, V2
 
     def useBins(s, bins, results):
         """Use spectral bins and s.gaps to calculate yearly energy yield and eff.
@@ -799,8 +800,8 @@ class effs(object):
                 if (eff>effmax):
                     effmax = eff
                 results = s.useBins(s.bins, results)  # Calculate efficiency for s.gaps, store result if gaps are good
-                if results % 2 == 0:  # Show calculation progress from time to time
-                    print('Tried '+str(ncells)+', got '+str(results)+' candidate gap combinations.           ', end="\r")
+                #if results % 8 == 0:  # Show calculation progress from time to time
+                    #print('Tried '+str(ncells)+', got '+str(results)+' # ', end="\r\r")
             ncells += 1
 
         threshold = s.effs[:, s.bins[-1]].max() - s.effMin
@@ -818,6 +819,7 @@ class effs(object):
 
     def results(s):
         """ After findGaps() or recalculate(), or load(), this function shows the main results """
+        print('---' + s.name + '---')
         print('Maximum efficiency:', s.auxEffs.max())
         print('Maximum yearly energy yield:', s.kWh(s.auxEffs.max()))
         print('P sun',365.25*24 * s.P[s.d, 1] * (1 - s.cloudCover) * s.daytimeFraction / 1000, 'cloudCover', s.cloudCover, 'daytimeFraction', s.daytimeFraction)
