@@ -10,14 +10,14 @@ eff.plot() # Figures saved to PNG files.
 
 eff.save() # Data saved for later reuse/replotting. Path and file name set in eff.name, some parameters and timestamp are appended to filename
 
-eff2 = tandems.copy.deepcopy(eff)
+eff2 = tandems.deepcopy(eff)
 eff2.__init__(junctions=4,bins=8, concentration=1, R=4e-5)  # Change input parameters but keep previously found set of optimal gap combinations.
 eff2.recalculate() # Recalculate efficiencies for previously found set of optimal gap combinations.
 eff2.compare(eff) # Compares efficiencies in two datasets by doing eff2 - eff. Plots difference and saves PNG files.
 
-eff = tandems.load('/path/and file name here') # Load previusly saved data
-eff.results()
-eff.plot()
+# eff = tandems.load('/path/and file name here') # Load previusly saved data
+# eff.results()
+# eff.plot()
 
 # The .npy files with the spectra used to calculate the yearly average efficiency have been generated with genBins.py
 
