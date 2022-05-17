@@ -26,7 +26,7 @@ Project Organization
     └── tests
 
 
-INSTAL
+INSTALL
 ==============================
 Install from pypi
 ```bash
