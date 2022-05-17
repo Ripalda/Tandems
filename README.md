@@ -33,7 +33,7 @@ Install from pypi
 pip install tandems
 ```
 
-Developement install
+Development install
 
 ```bash
 git clone https://github.com/ripalda/tandems
