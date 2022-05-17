@@ -1,8 +1,12 @@
 include HISTORY.rst
 include LICENSE
 include README.rst
+include tandems/data/AM1_5_smarts295.ext.txt
+include tandems/data/AM1_5_smarts295.out.txt
+include tandems/data/lat40.clusters.npy
+include tandems/data/lat40.timePerCluster.npy
 
-recursive-include tests *
+
 recursive-exclude * __pycache__
 recursive-exclude * *.py[co]
 

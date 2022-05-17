@@ -1,24 +1,5 @@
 # -*- coding: utf-8 -*-
-import tandems
-
-tandems.docs()
-
-eff = tandems.effs(junctions=4, bins=6, concentration=500)    #    Include as many or as few options as needed.
-eff.findGaps()
-eff.plot() # Figures saved to PNG files.
-
-eff.save() # Data saved for later reuse/replotting. Path and file name set in eff.name, some parameters and timestamp are appended to filename
-
-eff2 = tandems.deepcopy(eff)
-eff2.__init__(junctions=4,bins=8, concentration=1, R=4e-5)  # Change input parameters but keep previously found set of optimal gap combinations.
-eff2.recalculate() # Recalculate efficiencies for previously found set of optimal gap combinations.
-eff2.compare(eff) # Compares efficiencies in two datasets by doing eff2 - eff. Plots difference and saves PNG files.
-
-# eff = tandems.load('/path/and file name here') # Load previusly saved data
-# eff.results()
-# eff.plot()
-
-# The .npy files with the spectra used to calculate the yearly average efficiency have been generated with genBins.py
+"""# The .npy files with the spectra used to calculate the yearly average efficiency have been generated with genBins.py
 
 ---- CONTENTS OF tandems PYTHON MODULE ----
 
@@ -137,3 +118,29 @@ FUNCTION tandems.show_assumptions():  Shows the used EQE model and the AOD and P
 FUNCTION tandems.load(fname):  Usage: eff = tandems.load('/path/and file name here') 
 
 FUNCTION tandems.docs()   Shows this HELP file
+"""
+
+import tandems
+
+def main():
+
+    #tandems.docs()
+    # No attribute?
+
+    eff = tandems.effs(junctions=4, bins=6, concentration=500)    #    Include as many or as few options as needed.
+    eff.findGaps()
+    eff.plot() # Figures saved to PNG files.
+
+    eff.save() # Data saved for later reuse/replotting. Path and file name set in eff.name, some parameters and timestamp are appended to filename
+
+    eff2 = tandems.deepcopy(eff)
+    eff2.__init__(junctions=4,bins=8, concentration=1, R=4e-5)  # Change input parameters but keep previously found set of optimal gap combinations.
+    eff2.recalculate() # Recalculate efficiencies for previously found set of optimal gap combinations.
+    eff2.compare(eff) # Compares efficiencies in two datasets by doing eff2 - eff. Plots difference and saves PNG files.
+
+    eff = tandems.load('Test lat40.clusters 4 4 500 F95tjG') # Load previusly saved data
+    eff.results()
+    eff.plot()
+
+if __name__ == '__main__':
+    main()

@@ -69,7 +69,7 @@ colors = [[ 0.3 ,  0.  ,  0.2 ],
 LGBT = LinearSegmentedColormap.from_list('LGBT', colors, 500)
 
 # Load standard reference spectra ASTM G173
-wavel, g1_5, d1_5 = np.loadtxt(Dpath + "AM1_5 smarts295.ext.txt",
+wavel, g1_5, d1_5 = np.loadtxt(Dpath + "AM1_5_smarts295.ext.txt",
                                delimiter=',', usecols=(0, 1, 2), unpack=True)
 Energies = 1e9*hc/q/wavel  # wavel is wavelenght in nm
 binMax = 31  # Maximum number of clusters (or bins) + 1
@@ -1308,7 +1308,8 @@ def generate_spectral_bins(latMin=40, latMax=40, longitude='random',
                 # k-means # Find clusters of spectra
                 if clustersCount == 1 or submethod == 'kmeans':
                     clusters = KMeans(n_clusters=clustersCount+extraClusters,
-                                      n_jobs=-1, n_init=4
+                                      #n_jobs=-1,  Set number of jobs with OMP_NUM_THREADS
+                                      n_init=4
                                       ).fit(specFeat[d, :, :])
                 else:
                     if submethod == 'birch':
