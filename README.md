@@ -18,9 +18,28 @@ Project Organization
 --------------------
 
     .
-    ├── LICENSE
-    ├── README.md
-    └── data
+    ├── examples
+    ├── FARMS-NIT-clustered-spectra-USA
+    ├── maps
+    ├── tandems
+    │   └── data
+    └── tests
+
+
+INSTALL
+==============================
+Install from pypi
+```bash
+pip install tandems
+```
+
+Development install
+
+```bash
+git clone https://github.com/ripalda/tandems
+cd Tandems/ 
+pip install - e .
+```
 
 USAGE EXAMPLE
 ==============================
